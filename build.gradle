@@ -1,0 +1,23 @@
+plugins {
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    mainClass = 'com.chessgame.GamePlay'
+}
+
+javafx {
+    version = "21.0.5" // ✅ Stable version matching your JDK (not 25)
+    modules = [ 'javafx.controls', 'javafx.fxml' ]
+}
