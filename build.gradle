@@ -17,7 +17,11 @@ application {
     mainClass = 'com.chessgame.GamePlay'
 }
 
+dependencies {
+    implementation 'org.openpnp:opencv:4.9.0-0'
+}
+
 javafx {
-    version = "21.0.5" // ✅ Stable version matching your JDK (not 25)
+    version = "21.0.5" 
     modules = [ 'javafx.controls', 'javafx.fxml' ]
 }

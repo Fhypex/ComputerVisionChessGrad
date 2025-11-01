@@ -12,7 +12,7 @@ public class StockfishAPI {
         try {
             String encodedFEN = URLEncoder.encode(fen, "UTF-8");
             String apiUrl = "https://stockfish.online/api/s/v2.php?fen=" + encodedFEN + "&depth=" + depth;
-            URL url = new URL(apiUrl);
+            URL url = java.net.URI.create(apiUrl).toURL();
 
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
