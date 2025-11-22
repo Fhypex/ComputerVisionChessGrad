@@ -21,7 +21,7 @@ tasks.register('runTestYolo', JavaExec) {
     group = 'application'
     description = 'Runs the YOLO test program'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.chessgame.TestBoardCorners'
+    mainClass = 'com.chessgame.ChessBoardDebug'
 }
 
 dependencies {
