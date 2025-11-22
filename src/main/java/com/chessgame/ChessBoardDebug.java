@@ -31,6 +31,7 @@ public class ChessBoardDebug {
         String inputImagePath = Paths.get("src", "main", "resources", "tests", "test4.jpg").toString();
         String outputImagePath = Paths.get("output", "corners4.jpg").toString();
         String debugImagePath = Paths.get("output", "debug_all_attempts.jpg").toString();
+        String squaresOutputDir = Paths.get("output", "squares").toString();
 
         Mat src = Imgcodecs.imread(inputImagePath);
         if (src.empty()) {
@@ -40,6 +41,9 @@ public class ChessBoardDebug {
         }
 
         System.out.println("Image loaded. Resolution: " + src.width() + "x" + src.height());
+
+        // Create output directory for squares
+        new java.io.File(squaresOutputDir).mkdirs();
 
         // Create a debug image to show all attempts
         Mat debugImg = src.clone();
@@ -87,6 +91,11 @@ public class ChessBoardDebug {
 
         Imgcodecs.imwrite(outputImagePath, src);
         System.out.println("Processing complete. Output saved to " + outputImagePath);
+
+        // 5. Extract and save individual square images
+        // IMPORTANT: Use OUTER corners for extraction to avoid cutting off pieces on row 8
+        System.out.println("\n=== Extracting individual squares ===");
+        extractSquareImages(Imgcodecs.imread(inputImagePath), outerCorners, innerCorners, squaresOutputDir);
     }
 
     private static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
@@ -457,5 +466,132 @@ public class ChessBoardDebug {
                            new Point(corners[i].x + 10, corners[i].y - 10), 
                            Imgproc.FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
         }
+    }
+
+    /**
+     * Extracts individual square images from the chessboard.
+     * Uses OUTER corners to warp, then crops based on INNER grid to avoid losing pieces.
+     * Each square is cropped with extra vertical height to capture tall pieces.
+     * Adjusts for perspective: bottom rows get more offset, top rows get less.
+     * 
+     * @param src Original source image
+     * @param outerCorners The 4 corners of the outer board (44cm)
+     * @param innerCorners The 4 corners of the playable 8x8 board (40cm)
+     * @param outputDir Directory to save square images
+     */
+    private static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir) {
+        // Calculate the warped board size accounting for border
+        // We'll warp the OUTER board, which gives us more room around the edges
+        int warpedSize = VIRTUAL_RESOLUTION;
+        
+        // Set up perspective transform using OUTER corners
+        Point[] dstPoints = new Point[]{
+                new Point(0, 0),
+                new Point(warpedSize, 0),
+                new Point(warpedSize, warpedSize),
+                new Point(0, warpedSize)
+        };
+
+        Mat srcMat = new MatOfPoint2f(outerCorners);
+        Mat dstMat = new MatOfPoint2f(dstPoints);
+        Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
+
+        // Warp the OUTER board to a top-down view (includes border)
+        Mat warpedBoard = new Mat();
+        Imgproc.warpPerspective(src, warpedBoard, perspectiveMatrix, 
+                                new Size(warpedSize, warpedSize));
+
+        if (DEBUG_MODE) {
+            Imgcodecs.imwrite("debug_warped_board_outer.jpg", warpedBoard);
+        }
+
+        // Calculate where the inner board is in the warped image
+        // The inner board is 40cm within the 44cm outer board
+        double outerSize = OUTER_BOARD_SIZE_CM;
+        double innerSize = INNER_BOARD_SIZE_CM;
+        double borderRatio = BORDER_WIDTH_CM / outerSize; // 2cm / 44cm
+        
+        // Inner board starts at borderRatio and spans (innerSize/outerSize)
+        double innerStartPixel = warpedSize * borderRatio;
+        double innerSizePixel = warpedSize * (innerSize / outerSize);
+        
+        // Calculate square size based on INNER board dimensions
+        double squareSize = innerSizePixel / 8.0;
+        
+        System.out.println("Warped outer board size: " + warpedSize);
+        System.out.println("Inner board starts at: " + innerStartPixel);
+        System.out.println("Inner board size: " + innerSizePixel);
+        System.out.println("Square size: " + squareSize);
+        
+        // Base extra padding for pieces
+        double baseExtraHeightRatio = 0.8;  // 80% base
+        double extraWidthRatio = 0.3;       // 30% total (15% each side)
+        
+        int extraWidthPerSide = (int)(squareSize * extraWidthRatio / 2.0);
+
+        int squareNumber = 1;
+        
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                // Calculate base square position WITHIN the inner board
+                double baseX = innerStartPixel + (col * squareSize);
+                double baseY = innerStartPixel + (row * squareSize);
+                
+                // Adjust vertical offset based on row (perspective adjustment)
+                // Row 0 (8th rank - back row) needs MUCH more height for tall pieces
+                double rowAdjustment;
+                if (row == 0) {
+                    // 8th rank (back row): +50% extra for tall pieces
+                    rowAdjustment = baseExtraHeightRatio + 0.5;
+                } else if (row < 4) {
+                    // Top half (rows 1-3): -10% adjustment (pieces further from camera)
+                    rowAdjustment = baseExtraHeightRatio - 0.1;
+                } else {
+                    // Bottom half (rows 4-7): +10% adjustment (pieces closer to camera)
+                    rowAdjustment = baseExtraHeightRatio + 0.1;
+                }
+                
+                int extraHeight = (int)(squareSize * rowAdjustment);
+
+                // Extend upward and sideways to capture pieces
+                int extendedX = (int)Math.max(0, baseX - extraWidthPerSide);
+                int extendedY = (int)Math.max(0, baseY - extraHeight);
+                
+                int extendedWidth = (int)squareSize + (2 * extraWidthPerSide);
+                int extendedHeight = (int)squareSize + extraHeight;
+                
+                // Ensure we don't go out of bounds
+                if (extendedX + extendedWidth > warpedSize) {
+                    extendedWidth = warpedSize - extendedX;
+                }
+                
+                if (extendedY + extendedHeight > warpedSize) {
+                    extendedHeight = warpedSize - extendedY;
+                }
+
+                // Extract the square region
+                Rect squareRect = new Rect(extendedX, extendedY, extendedWidth, extendedHeight);
+                Mat squareImg = new Mat(warpedBoard, squareRect);
+
+                // Generate filename with chess notation
+                String chessNotation = (char)('A' + col) + "" + (8 - row);
+                String filename = String.format("square%02d_%s.jpg", squareNumber, chessNotation);
+                String filepath = Paths.get(outputDir, filename).toString();
+
+                // Save the square image
+                Imgcodecs.imwrite(filepath, squareImg);
+                
+                if (squareNumber % 8 == 0) {
+                    System.out.println("Saved squares " + (squareNumber - 7) + "-" + squareNumber);
+                }
+                
+                squareNumber++;
+            }
+        }
+        
+        System.out.println("✓ Successfully extracted all 64 squares to " + outputDir);
+        System.out.println("Used OUTER board for warping to preserve pieces on row 8");
+        System.out.println("Vertical offset: 140% UPWARD for 8th rank, 60% for rows 7-5, 80% for rows 4-1");
+        System.out.println("Horizontal offset: 30% total (15% each side) - balanced");
     }
 }
