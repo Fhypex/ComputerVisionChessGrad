@@ -29,7 +29,7 @@ public class ChessBoardDebug {
     }
 
     public static void main(String[] args) {
-        String inputImagePath = Paths.get("src", "main", "resources", "tests", "IMG_9649.jpg").toString();
+        String inputImagePath = Paths.get("src", "main", "resources", "tests", "IMG_9644.jpg").toString();
         String outputImagePath = Paths.get("output", "IMG9649.jpg").toString();
         String debugImagePath = Paths.get("output", "debug_all_attempts.jpg").toString();
         String squaresOutputDir = Paths.get("output", "squares").toString();
