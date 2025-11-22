@@ -18,6 +18,7 @@ public class ChessBoardDebug {
     private static final double INNER_BOARD_SIZE_CM = 40.0;  // Playable 8x8 area
     private static final double BORDER_WIDTH_CM = (OUTER_BOARD_SIZE_CM - INNER_BOARD_SIZE_CM) / 2.0; // 2cm per side
     
+    
     private static final int VIRTUAL_RESOLUTION = 800;
     
     // Set to true to save intermediate images for debugging
@@ -28,11 +29,13 @@ public class ChessBoardDebug {
     }
 
     public static void main(String[] args) {
-        String inputImagePath = Paths.get("src", "main", "resources", "tests", "test4.jpg").toString();
-        String outputImagePath = Paths.get("output", "corners4.jpg").toString();
+        String inputImagePath = Paths.get("src", "main", "resources", "tests", "IMG_9640.jpg").toString();
+        String outputImagePath = Paths.get("output", "corners9640.jpg").toString();
         String debugImagePath = Paths.get("output", "debug_all_attempts.jpg").toString();
         String squaresOutputDir = Paths.get("output", "squares").toString();
-
+        java.io.File f = new java.io.File(inputImagePath);
+        String fileNameWithExt = f.getName();
+        String baseFileName = fileNameWithExt.replaceFirst("[.][^.]+$", "");
         Mat src = Imgcodecs.imread(inputImagePath);
         if (src.empty()) {
             System.err.println("Cannot read image: " + inputImagePath);
@@ -95,7 +98,7 @@ public class ChessBoardDebug {
         // 5. Extract and save individual square images
         // IMPORTANT: Use OUTER corners for extraction to avoid cutting off pieces on row 8
         System.out.println("\n=== Extracting individual squares ===");
-        extractSquareImages(Imgcodecs.imread(inputImagePath), outerCorners, innerCorners, squaresOutputDir);
+        extractSquareImages(Imgcodecs.imread(inputImagePath), outerCorners, innerCorners, squaresOutputDir , baseFileName);
     }
 
     private static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
@@ -490,7 +493,7 @@ public class ChessBoardDebug {
      * @param innerCorners The 4 corners of the playable 8x8 board (40cm)
      * @param outputDir Directory to save square images
      */
-    private static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir) {
+    private static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir , String baseFileName) {
         int warpedWidth = VIRTUAL_RESOLUTION;
         
         // --- FIX START: Define a "Sky Buffer" ---
@@ -587,7 +590,7 @@ public class ChessBoardDebug {
 
                 // Save
                 String chessNotation = (char)('A' + col) + "" + (8 - row);
-                String filename = String.format("square%02d_%s.jpg", squareNumber, chessNotation);
+                String filename = String.format(baseFileName + "square%02d_%s.jpg", squareNumber, chessNotation);
                 String filepath = Paths.get(outputDir, filename).toString();
 
                 Imgcodecs.imwrite(filepath, squareImg);
