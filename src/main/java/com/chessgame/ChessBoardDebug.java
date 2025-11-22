@@ -376,48 +376,59 @@ public class ChessBoardDebug {
      * The border is 2cm on each side (44cm outer -> 40cm inner).
      */
     private static Point[] calculateInnerCorners(Point[] outerCorners) {
-        // outerCorners: [TL, TR, BR, BL]
-        Point tl = outerCorners[0];
-        Point tr = outerCorners[1];
-        Point br = outerCorners[2];
-        Point bl = outerCorners[3];
-        
-        // Calculate the shrink ratio: inner/outer = 40/44
-        double shrinkRatio = INNER_BOARD_SIZE_CM / OUTER_BOARD_SIZE_CM;
-        
-        // The border offset as a ratio from each edge
-        double offsetRatio = (1.0 - shrinkRatio) / 2.0; // = (1 - 40/44) / 2 = 0.0454...
-        
-        // Calculate inner corners using linear interpolation
-        Point[] innerCorners = new Point[4];
-        
-        // Top-left inner
-        innerCorners[0] = new Point(
-            tl.x + offsetRatio * (tr.x - tl.x) + offsetRatio * (bl.x - tl.x),
-            tl.y + offsetRatio * (tr.y - tl.y) + offsetRatio * (bl.y - tl.y)
-        );
-        
-        // Top-right inner
-        innerCorners[1] = new Point(
-            tr.x - offsetRatio * (tr.x - tl.x) + offsetRatio * (br.x - tr.x),
-            tr.y - offsetRatio * (tr.y - tl.y) + offsetRatio * (br.y - tr.y)
-        );
-        
-        // Bottom-right inner
-        innerCorners[2] = new Point(
-            br.x - offsetRatio * (br.x - bl.x) - offsetRatio * (br.x - tr.x),
-            br.y - offsetRatio * (br.y - bl.y) - offsetRatio * (br.y - tr.y)
-        );
-        
-        // Bottom-left inner
-        innerCorners[3] = new Point(
-            bl.x + offsetRatio * (br.x - bl.x) - offsetRatio * (bl.x - tl.x),
-            bl.y + offsetRatio * (br.y - bl.y) - offsetRatio * (bl.y - tl.y)
-        );
-        
-        System.out.println("Calculated inner corners with " + BORDER_WIDTH_CM + "cm border offset");
-        return innerCorners;
-    }
+    // outerCorners: [TL, TR, BR, BL]
+    Point tl = outerCorners[0];
+    Point tr = outerCorners[1];
+    Point br = outerCorners[2];
+    Point bl = outerCorners[3];
+
+    // Calculate the shrink ratio: inner/outer = 40/44
+    double shrinkRatio = INNER_BOARD_SIZE_CM / OUTER_BOARD_SIZE_CM;
+
+    // 1. Calculate the BASE offset ratio (approx 0.045)
+    double baseOffsetRatio = (1.0 - shrinkRatio) / 2.0;
+
+    // 2. APPLY YOUR ADJUSTMENTS HERE
+    // Top border is 10% thinner (0.9), Bottom border is 10% thicker (1.1)
+    double topRatio = baseOffsetRatio * 0.84;
+    double bottomRatio = baseOffsetRatio * 1.16;
+    double sideRatio = baseOffsetRatio; // Sides stay standard
+
+    Point[] innerCorners = new Point[4];
+
+    // Top-left inner
+    // Moves Right by sideRatio, Moves DOWN by topRatio
+    innerCorners[0] = new Point(
+        tl.x + sideRatio * (tr.x - tl.x) + topRatio * (bl.x - tl.x),
+        tl.y + sideRatio * (tr.y - tl.y) + topRatio * (bl.y - tl.y)
+    );
+
+    // Top-right inner
+    // Moves Left by sideRatio, Moves DOWN by topRatio
+    innerCorners[1] = new Point(
+        tr.x - sideRatio * (tr.x - tl.x) + topRatio * (br.x - tr.x),
+        tr.y - sideRatio * (tr.y - tl.y) + topRatio * (br.y - tr.y)
+    );
+
+    // Bottom-right inner
+    // Moves Left by sideRatio, Moves UP by bottomRatio
+    innerCorners[2] = new Point(
+        br.x - sideRatio * (br.x - bl.x) - bottomRatio * (br.x - tr.x),
+        br.y - sideRatio * (br.y - bl.y) - bottomRatio * (br.y - tr.y)
+    );
+
+    // Bottom-left inner
+    // Moves Right by sideRatio, Moves UP by bottomRatio
+    innerCorners[3] = new Point(
+        bl.x + sideRatio * (br.x - bl.x) - bottomRatio * (bl.x - tl.x),
+        bl.y + sideRatio * (br.y - bl.y) - bottomRatio * (bl.y - tl.y)
+    );
+
+    System.out.println("Calculated inner corners with adjusted offsets:");
+    System.out.println("Top: " + (topRatio*100) + "%, Bottom: " + (bottomRatio*100) + "%");
+    
+    return innerCorners;
+}
 
     private static List<Point> calculateGridCenters(Point[] innerCorners) {
         List<Point> centers = new ArrayList<>();
@@ -480,118 +491,109 @@ public class ChessBoardDebug {
      * @param outputDir Directory to save square images
      */
     private static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir) {
-        // Calculate the warped board size accounting for border
-        // We'll warp the OUTER board, which gives us more room around the edges
-        int warpedSize = VIRTUAL_RESOLUTION;
+        int warpedWidth = VIRTUAL_RESOLUTION;
+        
+        // --- FIX START: Define a "Sky Buffer" ---
+        // We need extra space ABOVE the board in the warped image for tall pieces on the back rank.
+        // Let's add 50% of the board height as a buffer above.
+        int skyBuffer = (int)(warpedWidth * 0.5); 
+        int warpedHeight = warpedWidth + skyBuffer; // Total height of the new image
         
         // Set up perspective transform using OUTER corners
+        // Crucial Change: We shift the Y coordinates down by 'skyBuffer'
         Point[] dstPoints = new Point[]{
-                new Point(0, 0),
-                new Point(warpedSize, 0),
-                new Point(warpedSize, warpedSize),
-                new Point(0, warpedSize)
+                new Point(0, skyBuffer),                  // TL maps to (0, skyBuffer)
+                new Point(warpedWidth, skyBuffer),        // TR
+                new Point(warpedWidth, warpedWidth + skyBuffer), // BR
+                new Point(0, warpedWidth + skyBuffer)     // BL
         };
+        // --- FIX END ---
 
         Mat srcMat = new MatOfPoint2f(outerCorners);
         Mat dstMat = new MatOfPoint2f(dstPoints);
         Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
 
-        // Warp the OUTER board to a top-down view (includes border)
+        // Warp the image with the new height
         Mat warpedBoard = new Mat();
         Imgproc.warpPerspective(src, warpedBoard, perspectiveMatrix, 
-                                new Size(warpedSize, warpedSize));
+                                new Size(warpedWidth, warpedHeight));
 
         if (DEBUG_MODE) {
-            Imgcodecs.imwrite("debug_warped_board_outer.jpg", warpedBoard);
+            Imgcodecs.imwrite("debug_warped_board_with_buffer.jpg", warpedBoard);
         }
 
-        // Calculate where the inner board is in the warped image
-        // The inner board is 40cm within the 44cm outer board
+        // Calculate geometry
         double outerSize = OUTER_BOARD_SIZE_CM;
         double innerSize = INNER_BOARD_SIZE_CM;
-        double borderRatio = BORDER_WIDTH_CM / outerSize; // 2cm / 44cm
+        double borderRatio = BORDER_WIDTH_CM / outerSize; 
         
-        // Inner board starts at borderRatio and spans (innerSize/outerSize)
-        double innerStartPixel = warpedSize * borderRatio;
-        double innerSizePixel = warpedSize * (innerSize / outerSize);
-        
-        // Calculate square size based on INNER board dimensions
+        // Inner board pixel calculation
+        double innerStartPixel = warpedWidth * borderRatio;
+        double innerSizePixel = warpedWidth * (innerSize / outerSize);
         double squareSize = innerSizePixel / 8.0;
         
-        System.out.println("Warped outer board size: " + warpedSize);
-        System.out.println("Inner board starts at: " + innerStartPixel);
-        System.out.println("Inner board size: " + innerSizePixel);
-        System.out.println("Square size: " + squareSize);
-        
         // Base extra padding for pieces
-        double baseExtraHeightRatio = 0.8;  // 80% base
-        double extraWidthRatio = 0.3;       // 30% total (15% each side)
-        
+        double baseExtraHeightRatio = 0.85;  
+        double extraWidthRatio = 0.3;       
         int extraWidthPerSide = (int)(squareSize * extraWidthRatio / 2.0);
 
         int squareNumber = 1;
         
         for (int row = 0; row < 8; row++) {
             for (int col = 0; col < 8; col++) {
-                // Calculate base square position WITHIN the inner board
-                double baseX = innerStartPixel + (col * squareSize);
-                double baseY = innerStartPixel + (row * squareSize);
                 
-                // Adjust vertical offset based on row (perspective adjustment)
-                // Row 0 (8th rank - back row) needs MUCH more height for tall pieces
+                // --- FIX: Adjust Base Y to account for the Sky Buffer ---
+                // The board doesn't start at Y=0 anymore; it starts at Y=skyBuffer
+                double baseX = innerStartPixel + (col * squareSize);
+                double baseY = skyBuffer + innerStartPixel + (row * squareSize); 
+                
+                // Logic for row adjustments (unchanged, but now safe to use)
                 double rowAdjustment;
+
                 if (row == 0) {
-                    // 8th rank (back row): +50% extra for tall pieces
-                    rowAdjustment = baseExtraHeightRatio + 0.5;
-                } else if (row < 4) {
-                    // Top half (rows 1-3): -10% adjustment (pieces further from camera)
-                    rowAdjustment = baseExtraHeightRatio - 0.1;
+                    // Rank 8: Can now safely grab huge chunks upwards
+                    rowAdjustment = baseExtraHeightRatio + 0.3; 
+                } else if (row < 2) {
+                    rowAdjustment = baseExtraHeightRatio + 0.2;
+                } else if(row < 4) {
+                    rowAdjustment = baseExtraHeightRatio;
+                }  else if(row < 6) {
+                    rowAdjustment = baseExtraHeightRatio - 0.2;
                 } else {
-                    // Bottom half (rows 4-7): +10% adjustment (pieces closer to camera)
-                    rowAdjustment = baseExtraHeightRatio + 0.1;
+                    rowAdjustment = baseExtraHeightRatio -0.3;
                 }
                 
                 int extraHeight = (int)(squareSize * rowAdjustment);
 
-                // Extend upward and sideways to capture pieces
+                // Calculate Crop Coordinates
+                // Since we added skyBuffer, (baseY - extraHeight) will no longer be negative!
                 int extendedX = (int)Math.max(0, baseX - extraWidthPerSide);
                 int extendedY = (int)Math.max(0, baseY - extraHeight);
                 
                 int extendedWidth = (int)squareSize + (2 * extraWidthPerSide);
                 int extendedHeight = (int)squareSize + extraHeight;
                 
-                // Ensure we don't go out of bounds
-                if (extendedX + extendedWidth > warpedSize) {
-                    extendedWidth = warpedSize - extendedX;
+                // Boundary Checks (Prevent crashing if we go off the bottom/right)
+                if (extendedX + extendedWidth > warpedBoard.width()) {
+                    extendedWidth = warpedBoard.width() - extendedX;
                 }
-                
-                if (extendedY + extendedHeight > warpedSize) {
-                    extendedHeight = warpedSize - extendedY;
+                if (extendedY + extendedHeight > warpedBoard.height()) {
+                    extendedHeight = warpedBoard.height() - extendedY;
                 }
 
-                // Extract the square region
+                // Extract
                 Rect squareRect = new Rect(extendedX, extendedY, extendedWidth, extendedHeight);
                 Mat squareImg = new Mat(warpedBoard, squareRect);
 
-                // Generate filename with chess notation
+                // Save
                 String chessNotation = (char)('A' + col) + "" + (8 - row);
                 String filename = String.format("square%02d_%s.jpg", squareNumber, chessNotation);
                 String filepath = Paths.get(outputDir, filename).toString();
 
-                // Save the square image
                 Imgcodecs.imwrite(filepath, squareImg);
-                
-                if (squareNumber % 8 == 0) {
-                    System.out.println("Saved squares " + (squareNumber - 7) + "-" + squareNumber);
-                }
-                
                 squareNumber++;
             }
         }
-        
-        System.out.println("✓ Successfully extracted all 64 squares to " + outputDir);
-        System.out.println("Used OUTER board for warping to preserve pieces on row 8");
-        System.out.println("Vertical offset: 140% UPWARD for 8th rank, 60% for rows 7-5, 80% for rows 4-1");
-        System.out.println("Horizontal offset: 30% total (15% each side) - balanced");
+        System.out.println("✓ Extracted with Sky Buffer. Check debug_warped_board_with_buffer.jpg to see the extra space.");
     }
 }
