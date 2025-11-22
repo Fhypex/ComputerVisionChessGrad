@@ -14,14 +14,27 @@ java {
 }
 
 application {
-    mainClass = 'com.chessgame.GamePlay'
+    mainClass = 'com.chessgame.com.chessgame.GamePlay'
+}
+
+tasks.register('runTestYolo', JavaExec) {
+    group = 'application'
+    description = 'Runs the YOLO test program'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.chessgame.TestBoardCorners'
 }
 
 dependencies {
     implementation 'org.openpnp:opencv:4.9.0-0'
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
 }
 
 javafx {
     version = "21.0.5" 
     modules = [ 'javafx.controls', 'javafx.fxml' ]
+}
+
+tasks.withType(JavaExec) {
+    // Fixes "no such file or directory" for onnxruntime native libs
+    jvmArgs += ["-Djava.library.path=${buildDir}/libs"]
 }
