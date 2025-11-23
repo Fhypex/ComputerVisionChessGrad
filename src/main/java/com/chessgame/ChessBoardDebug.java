@@ -30,7 +30,11 @@ public class ChessBoardDebug {
 
     public static void main(String[] args) {
 
+<<<<<<< HEAD
         String nameOfFile = "IMG_9671_720p.jpg";
+=======
+        String nameOfFile = "IMG_9667_720p.jpg";
+>>>>>>> 68aff84ca08084af8ff5145dd691d5c507e16be1
 
         String inputImagePath = Paths.get("src", "main", "resources", "tests", nameOfFile).toString();
 
