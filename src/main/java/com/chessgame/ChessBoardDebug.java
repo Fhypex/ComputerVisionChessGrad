@@ -29,9 +29,15 @@ public class ChessBoardDebug {
     }
 
     public static void main(String[] args) {
-        String inputImagePath = Paths.get("src", "main", "resources", "tests", "IMG_9644.jpg").toString();
-        String outputImagePath = Paths.get("output", "IMG9649.jpg").toString();
+
+        String nameOfFile = "IMG_9657.jpg";
+
+        String inputImagePath = Paths.get("src", "main", "resources", "tests", nameOfFile).toString();
+
+        String outputImagePath = Paths.get("output", nameOfFile).toString();
+
         String debugImagePath = Paths.get("output", "debug_all_attempts.jpg").toString();
+
         String squaresOutputDir = Paths.get("output", "squares").toString();
         java.io.File f = new java.io.File(inputImagePath);
         String fileNameWithExt = f.getName();
@@ -102,57 +108,85 @@ public class ChessBoardDebug {
     }
 
     private static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
-        // Downscale for better detection
-        double processingWidth = 600.0;
-        double scale = 1.0;
-        Mat src = new Mat();
+    // Downscale for better detection
+    double processingWidth = 600.0;
+    double scale = 1.0;
+    Mat src = new Mat();
 
-        if (originalSrc.width() > processingWidth) {
-            scale = processingWidth / originalSrc.width();
-            Imgproc.resize(originalSrc, src, new Size(), scale, scale, Imgproc.INTER_AREA);
-            System.out.println("Downscaled image for processing (Scale factor: " + scale + ")");
-        } else {
-            originalSrc.copyTo(src);
-        }
+    if (originalSrc.width() > processingWidth) {
+        scale = processingWidth / originalSrc.width();
+        Imgproc.resize(originalSrc, src, new Size(), scale, scale, Imgproc.INTER_AREA);
+        System.out.println("Downscaled image for processing (Scale factor: " + scale + ")");
+    } else {
+        originalSrc.copyTo(src);
+    }
 
-        Mat gray = new Mat();
-        Mat blurred = new Mat();
-        Mat thresh = new Mat();
+    Mat gray = new Mat();
+    Mat blurred = new Mat();
+    Mat thresh = new Mat();
 
-        // 1. Grayscale
-        Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
+    // 1. Grayscale
+    Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
 
-        // 2. Preprocessing
-        Imgproc.GaussianBlur(gray, blurred, new Size(5, 5), 0);
-        Imgproc.medianBlur(blurred, blurred, 3);
+    // 2. Enhanced preprocessing
+    Imgproc.GaussianBlur(gray, blurred, new Size(7, 7), 0);
+    
+    // 3. Try multiple thresholding approaches
+    List<Mat> thresholdedImages = new ArrayList<>();
+    
+    // Approach 1: Adaptive threshold (existing)
+    Mat thresh1 = new Mat();
+    Imgproc.adaptiveThreshold(blurred, thresh1, 255, 
+            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            Imgproc.THRESH_BINARY_INV, 21, 5);
+    thresholdedImages.add(thresh1);
+    
+    // Approach 2: Otsu's thresholding
+    Mat thresh2 = new Mat();
+    Imgproc.threshold(blurred, thresh2, 0, 255, 
+            Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU);
+    thresholdedImages.add(thresh2);
+    
+    // Approach 3: Canny edge detection
+    Mat edges = new Mat();
+    Imgproc.Canny(blurred, edges, 50, 150);
+    // Dilate edges to connect them
+    Mat kernelEdge = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+    Imgproc.dilate(edges, edges, kernelEdge, new Point(-1, -1), 2);
+    thresholdedImages.add(edges);
 
-        // 3. Adaptive Thresholding
-        Imgproc.adaptiveThreshold(blurred, thresh, 255, 
-                Imgproc.ADAPTIVE_THRESH_MEAN_C, 
-                Imgproc.THRESH_BINARY_INV, 15, 3);
+    if (DEBUG_MODE) {
+        Imgcodecs.imwrite("debug_threshold1_adaptive.jpg", thresh1);
+        Imgcodecs.imwrite("debug_threshold2_otsu.jpg", thresh2);
+        Imgcodecs.imwrite("debug_threshold3_edges.jpg", edges);
+    }
 
-        // 4. Morphological Operations
+    double imageArea = src.width() * src.height();
+    
+    // Try each thresholding approach
+    for (int threshIdx = 0; threshIdx < thresholdedImages.size(); threshIdx++) {
+        Mat currentThresh = thresholdedImages.get(threshIdx);
+        
+        System.out.println("\n=== Trying threshold approach #" + threshIdx + " ===");
+        
+        // Morphological operations
+        Mat processed = new Mat();
         Mat kernelDilate = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
         Mat kernelErode = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
         
-        Imgproc.dilate(thresh, thresh, kernelDilate);
-        Imgproc.erode(thresh, thresh, kernelErode);
-        
-        if (DEBUG_MODE) {
-            Imgcodecs.imwrite("debug_threshold.jpg", thresh);
-        }
+        Imgproc.dilate(currentThresh, processed, kernelDilate);
+        Imgproc.erode(processed, processed, kernelErode);
 
-        // 5. Find Contours
+        // Find Contours
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = new Mat();
-        Imgproc.findContours(thresh, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+        Imgproc.findContours(processed, contours, hierarchy, 
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
         // Sort by area
         contours.sort((c1, c2) -> Double.compare(Imgproc.contourArea(c2), Imgproc.contourArea(c1)));
 
-        double imageArea = src.width() * src.height();
-        
-        int attemptNumber = 0;
+        int attemptNumber = threshIdx * 10;
         Scalar[] attemptColors = new Scalar[]{
             new Scalar(255, 0, 0),    // Blue
             new Scalar(0, 255, 255),  // Yellow
@@ -166,21 +200,21 @@ public class ChessBoardDebug {
             new Scalar(200, 200, 200) // Light Gray
         };
 
-        for (int i = 0; i < Math.min(contours.size(), 10); i++) {
+        for (int i = 0; i < Math.min(contours.size(), 15); i++) {
             MatOfPoint contour = contours.get(i);
             double area = Imgproc.contourArea(contour);
 
-            System.out.println("\n--- Checking contour #" + i + " ---");
+            System.out.println("\n--- Checking contour #" + i + " (threshold " + threshIdx + ") ---");
             System.out.println("Area: " + area + " (" + (area/imageArea*100) + "% of image)");
 
-            // Skip if too small or too large
-            if (area < imageArea * 0.1) {
-                System.out.println("Skipped: Too small (< 10% of image)");
+            // Adjusted size constraints - chessboard should be 20-85% of image
+            if (area < imageArea * 0.20) {
+                System.out.println("Skipped: Too small (< 20% of image)");
                 continue;
             }
             
-            if (area > imageArea * 0.95) {
-                System.out.println("Skipped: Too large (> 95% of image, probably the whole image border)");
+            if (area > imageArea * 0.85) {
+                System.out.println("Skipped: Too large (> 85% of image)");
                 continue;
             }
 
@@ -195,8 +229,8 @@ public class ChessBoardDebug {
             }
             MatOfPoint2f hull2f = new MatOfPoint2f(hullPoints);
 
-            // Try different epsilon values
-            for (double epsilonFactor = 0.02; epsilonFactor <= 0.08; epsilonFactor += 0.01) {
+            // Try multiple epsilon values
+            for (double epsilonFactor = 0.015; epsilonFactor <= 0.10; epsilonFactor += 0.005) {
                 double peri = Imgproc.arcLength(hull2f, true);
                 MatOfPoint2f approx = new MatOfPoint2f();
                 Imgproc.approxPolyDP(hull2f, approx, epsilonFactor * peri, true);
@@ -205,6 +239,45 @@ public class ChessBoardDebug {
                     Point[] foundPoints = approx.toArray();
                     
                     System.out.println("Found 4-sided polygon with epsilon: " + epsilonFactor);
+                    
+                    // VALIDATION: Check if it forms a proper quadrilateral BEFORE scaling
+                    if (!isValidQuadrilateral(foundPoints)) {
+                        System.out.println("Rejected: Invalid quadrilateral");
+                        continue;
+                    }
+                    
+                    // Additional validation: Check corner angles
+                    Point[] ordered = orderPoints(foundPoints);
+                    if (!hasReasonableAngles(ordered)) {
+                        System.out.println("Rejected: Corner angles too extreme");
+                        continue;
+                    }
+                    
+                    // Check if board is reasonably centered
+                    double centerX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) / 4.0;
+                    double centerY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) / 4.0;
+                    
+                    double imgCenterX = src.width() / 2.0;
+                    double imgCenterY = src.height() / 2.0;
+                    
+                    double centerDistX = Math.abs(centerX - imgCenterX) / src.width();
+                    double centerDistY = Math.abs(centerY - imgCenterY) / src.height();
+                    
+                    System.out.println("Board center offset: X=" + (centerDistX*100) + "%, Y=" + (centerDistY*100) + "%");
+                    
+                    // More lenient centering check (40% instead of 30%)
+                    if (centerDistX > 0.40 || centerDistY > 0.40) {
+                        System.out.println("Rejected: Board too off-center");
+                        continue;
+                    }
+                    
+                    // Check solidity (area / convex hull area) - should be high for a board
+                    double solidity = area / Imgproc.contourArea(new MatOfPoint(hullPoints));
+                    System.out.println("Solidity: " + solidity);
+                    if (solidity < 0.85) {
+                        System.out.println("Rejected: Solidity too low (not solid enough)");
+                        continue;
+                    }
                     
                     // Scale to original image for visualization
                     Point[] scaledPoints = new Point[4];
@@ -224,31 +297,6 @@ public class ChessBoardDebug {
                     }
                     attemptNumber++;
                     
-                    // VALIDATION: Check if it forms a proper quadrilateral
-                    if (!isValidQuadrilateral(foundPoints)) {
-                        System.out.println("Rejected: Invalid quadrilateral");
-                        continue;
-                    }
-                    
-                    // Additional check: Board should be reasonably centered in the image
-                    Point[] ordered = orderPoints(foundPoints);
-                    double centerX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) / 4.0;
-                    double centerY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) / 4.0;
-                    
-                    double imgCenterX = src.width() / 2.0;
-                    double imgCenterY = src.height() / 2.0;
-                    
-                    double centerDistX = Math.abs(centerX - imgCenterX) / src.width();
-                    double centerDistY = Math.abs(centerY - imgCenterY) / src.height();
-                    
-                    System.out.println("Board center offset: X=" + (centerDistX*100) + "%, Y=" + (centerDistY*100) + "%");
-                    
-                    // Board should be relatively centered (within 30% of center)
-                    if (centerDistX > 0.3 || centerDistY > 0.3) {
-                        System.out.println("Rejected: Board too off-center (might be a piece or edge)");
-                        continue;
-                    }
-                    
                     // Scale back to original image size
                     for(Point p : foundPoints) {
                         p.x = p.x / scale;
@@ -260,97 +308,72 @@ public class ChessBoardDebug {
                 }
             }
         }
-
-        return null;
     }
 
+    return null;
+}
     /**
      * Validates that 4 points form a proper quadrilateral.
      * Very lenient check - mainly ensures it's roughly quadrilateral shaped
      * and filters out obvious non-board shapes.
      */
     private static boolean isValidQuadrilateral(Point[] pts) {
-        Point[] ordered = orderPoints(pts);
-        // ordered: [TL, TR, BR, BL]
-        
-        Point tl = ordered[0];
-        Point tr = ordered[1];
-        Point br = ordered[2];
-        Point bl = ordered[3];
-        
-        // Calculate dimensions
-        double topWidth = tr.x - tl.x;
-        double bottomWidth = br.x - bl.x;
-        double leftHeight = bl.y - tl.y;
-        double rightHeight = br.y - tr.y;
-        
-        double avgWidth = (topWidth + bottomWidth) / 2.0;
-        double avgHeight = (leftHeight + rightHeight) / 2.0;
-        
-        System.out.println("Quadrilateral check:");
-        System.out.println("  Top width: " + topWidth + ", Bottom width: " + bottomWidth);
-        System.out.println("  Left height: " + leftHeight + ", Right height: " + rightHeight);
-        System.out.println("  TL: (" + tl.x + ", " + tl.y + ")");
-        System.out.println("  TR: (" + tr.x + ", " + tr.y + ")");
-        System.out.println("  BR: (" + br.x + ", " + br.y + ")");
-        System.out.println("  BL: (" + bl.x + ", " + bl.y + ")");
-        
-        // Check 1: Top corners should be roughly horizontally aligned (similar Y)
-        double topYDiff = Math.abs(tr.y - tl.y);
-        double maxTopYDiff = avgHeight * 0.15; // Top edge can vary max 15% of height
-        if (topYDiff > maxTopYDiff) {
-            System.out.println("Failed: Top corners not horizontally aligned. Y diff: " + topYDiff + " (max: " + maxTopYDiff + ")");
-            return false;
-        }
-        
-        // Check 2: Bottom corners should be roughly horizontally aligned (similar Y)
-        double bottomYDiff = Math.abs(br.y - bl.y);
-        double maxBottomYDiff = avgHeight * 0.15; // Bottom edge can vary max 15% of height
-        if (bottomYDiff > maxBottomYDiff) {
-            System.out.println("Failed: Bottom corners not horizontally aligned. Y diff: " + bottomYDiff + " (max: " + maxBottomYDiff + ")");
-            return false;
-        }
-        
-        // Check 3: Width ratio shouldn't be too extreme (handles severe distortion)
-        double widthRatio = Math.min(topWidth, bottomWidth) / Math.max(topWidth, bottomWidth);
-        if (widthRatio < 0.3) { 
-            System.out.println("Failed: Width ratio too extreme: " + widthRatio);
-            return false;
-        }
-        
-        // Check 4: Height ratio shouldn't be too extreme
-        double heightRatio = Math.min(leftHeight, rightHeight) / Math.max(leftHeight, rightHeight);
-        if (heightRatio < 0.3) {
-            System.out.println("Failed: Height ratio too extreme: " + heightRatio);
-            return false;
-        }
-        
-        // Check 5: Aspect ratio should be somewhat square-ish (not a thin rectangle)
-        double aspectRatio = avgWidth / avgHeight;
-        if (aspectRatio < 0.3 || aspectRatio > 3.0) {
-            System.out.println("Failed: Aspect ratio too extreme: " + aspectRatio);
-            return false;
-        }
-        
-        // Check 6: Vertical edges - X alignment (lenient 50% tolerance)
-        double leftXDiff = Math.abs(bl.x - tl.x);
-        double rightXDiff = Math.abs(br.x - tr.x);
-        double maxAllowedXDiff = avgWidth * 0.5;
-        
-        if (leftXDiff > maxAllowedXDiff) {
-            System.out.println("Failed: Left edge X difference too large: " + leftXDiff + " (tolerance: " + maxAllowedXDiff + ")");
-            return false;
-        }
-        
-        if (rightXDiff > maxAllowedXDiff) {
-            System.out.println("Failed: Right edge X difference too large: " + rightXDiff + " (tolerance: " + maxAllowedXDiff + ")");
-            return false;
-        }
-        
-        System.out.println("✓ Validation passed - proper quadrilateral detected");
-        System.out.println("  Top Y diff: " + topYDiff + ", Bottom Y diff: " + bottomYDiff);
-        return true;
+    Point[] ordered = orderPoints(pts);
+    // ordered: [TL, TR, BR, BL]
+    
+    Point tl = ordered[0];
+    Point tr = ordered[1];
+    Point br = ordered[2];
+    Point bl = ordered[3];
+    
+    // Calculate dimensions
+    double topWidth = Math.sqrt(Math.pow(tr.x - tl.x, 2) + Math.pow(tr.y - tl.y, 2));
+    double bottomWidth = Math.sqrt(Math.pow(br.x - bl.x, 2) + Math.pow(br.y - bl.y, 2));
+    double leftHeight = Math.sqrt(Math.pow(bl.x - tl.x, 2) + Math.pow(bl.y - tl.y, 2));
+    double rightHeight = Math.sqrt(Math.pow(br.x - tr.x, 2) + Math.pow(br.y - tr.y, 2));
+    
+    double avgWidth = (topWidth + bottomWidth) / 2.0;
+    double avgHeight = (leftHeight + rightHeight) / 2.0;
+    
+    System.out.println("Quadrilateral check:");
+    System.out.println("  Top width: " + topWidth + ", Bottom width: " + bottomWidth);
+    System.out.println("  Left height: " + leftHeight + ", Right height: " + rightHeight);
+    
+    // Check 1: Width ratio shouldn't be too extreme
+    double widthRatio = Math.min(topWidth, bottomWidth) / Math.max(topWidth, bottomWidth);
+    if (widthRatio < 0.5) { // More strict than 0.3
+        System.out.println("Failed: Width ratio too extreme: " + widthRatio);
+        return false;
     }
+    
+    // Check 2: Height ratio shouldn't be too extreme
+    double heightRatio = Math.min(leftHeight, rightHeight) / Math.max(leftHeight, rightHeight);
+    if (heightRatio < 0.5) { // More strict than 0.3
+        System.out.println("Failed: Height ratio too extreme: " + heightRatio);
+        return false;
+    }
+    
+    // Check 3: Aspect ratio should be somewhat square-ish
+    double aspectRatio = avgWidth / avgHeight;
+    if (aspectRatio < 0.6 || aspectRatio > 1.7) { // More strict range
+        System.out.println("Failed: Aspect ratio not square enough: " + aspectRatio);
+        return false;
+    }
+    
+    // Check 4: Diagonals should be roughly equal (square property)
+    double diag1 = Math.sqrt(Math.pow(br.x - tl.x, 2) + Math.pow(br.y - tl.y, 2));
+    double diag2 = Math.sqrt(Math.pow(bl.x - tr.x, 2) + Math.pow(bl.y - tr.y, 2));
+    double diagRatio = Math.min(diag1, diag2) / Math.max(diag1, diag2);
+    
+    System.out.println("Diagonal ratio: " + diagRatio);
+    if (diagRatio < 0.8) {
+        System.out.println("Failed: Diagonals too unequal: " + diagRatio);
+        return false;
+    }
+    
+    System.out.println("✓ Validation passed - proper quadrilateral detected");
+    return true;
+}
 
     private static Point[] orderPoints(Point[] pts) {
         Point[] result = new Point[4];
@@ -598,5 +621,44 @@ public class ChessBoardDebug {
             }
         }
         System.out.println("✓ Extracted with Sky Buffer. Check debug_warped_board_with_buffer.jpg to see the extra space.");
+    }
+
+    private static boolean hasReasonableAngles(Point[] ordered) {
+    // ordered: [TL, TR, BR, BL]
+    double[] angles = new double[4];
+    
+    for (int i = 0; i < 4; i++) {
+        Point prev = ordered[(i + 3) % 4];
+        Point curr = ordered[i];
+        Point next = ordered[(i + 1) % 4];
+        
+        // Calculate angle at curr using dot product
+        double v1x = prev.x - curr.x;
+        double v1y = prev.y - curr.y;
+        double v2x = next.x - curr.x;
+        double v2y = next.y - curr.y;
+        
+        double dot = v1x * v2x + v1y * v2y;
+        double mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+        double mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+        
+        double cosAngle = dot / (mag1 * mag2);
+        // Clamp to [-1, 1] to handle floating point errors
+        cosAngle = Math.max(-1.0, Math.min(1.0, cosAngle));
+        angles[i] = Math.toDegrees(Math.acos(cosAngle));
+    }
+    
+    System.out.println("Corner angles: " + Arrays.toString(angles));
+    
+    // All angles should be roughly between 45 and 135 degrees
+    // (accounting for perspective distortion)
+    for (double angle : angles) {
+        if (angle < 40 || angle > 140) {
+            System.out.println("Failed: Angle " + angle + " is too extreme");
+            return false;
+        }
+    }
+    
+    return true;
     }
 }
