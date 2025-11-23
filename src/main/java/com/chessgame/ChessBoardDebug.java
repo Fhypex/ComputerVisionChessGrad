@@ -30,7 +30,7 @@ public class ChessBoardDebug {
 
     public static void main(String[] args) {
 
-        String nameOfFile = "IMG_9659.jpg";
+        String nameOfFile = "IMG_9640.jpg";
 
         String inputImagePath = Paths.get("src", "main", "resources", "tests", nameOfFile).toString();
 
@@ -123,45 +123,77 @@ public class ChessBoardDebug {
 
     Mat gray = new Mat();
     Mat blurred = new Mat();
-    Mat thresh = new Mat();
-
+    
     // 1. Grayscale
     Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
-
-    // 2. Enhanced preprocessing
+    
+    // 2. Enhanced preprocessing with better noise reduction
     Imgproc.GaussianBlur(gray, blurred, new Size(7, 7), 0);
+    
+    // NEW: Add bilateral filter to reduce noise while preserving edges
+    Mat bilateral = new Mat();
+    Imgproc.bilateralFilter(blurred, bilateral, 9, 75, 75);
+    
+    // NEW: Detect strong edges using gradient magnitude
+    Mat gradX = new Mat();
+    Mat gradY = new Mat();
+    Mat gradMag = new Mat();
+    Imgproc.Sobel(bilateral, gradX, CvType.CV_64F, 1, 0, 3);
+    Imgproc.Sobel(bilateral, gradY, CvType.CV_64F, 0, 1, 3);
+    Core.magnitude(gradX, gradY, gradMag);
+    Mat gradMag8U = new Mat();
+    gradMag.convertTo(gradMag8U, CvType.CV_8U);
+    
+    // NEW: Threshold gradient magnitude to get strong edges only
+    Mat strongEdges = new Mat();
+    Imgproc.threshold(gradMag8U, strongEdges, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
     
     // 3. Try multiple thresholding approaches
     List<Mat> thresholdedImages = new ArrayList<>();
     
     // Approach 1: Adaptive threshold (existing)
     Mat thresh1 = new Mat();
-    Imgproc.adaptiveThreshold(blurred, thresh1, 255, 
+    Imgproc.adaptiveThreshold(bilateral, thresh1, 255, 
             Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, 
             Imgproc.THRESH_BINARY_INV, 21, 5);
     thresholdedImages.add(thresh1);
     
     // Approach 2: Otsu's thresholding
     Mat thresh2 = new Mat();
-    Imgproc.threshold(blurred, thresh2, 0, 255, 
+    Imgproc.threshold(bilateral, thresh2, 0, 255, 
             Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU);
     thresholdedImages.add(thresh2);
     
-    // Approach 3: Canny edge detection
+    // Approach 3: Canny edge detection (improved)
     Mat edges = new Mat();
-    Imgproc.Canny(blurred, edges, 50, 150);
-    // Dilate edges to connect them
+    Imgproc.Canny(bilateral, edges, 50, 150);
     Mat kernelEdge = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
     Imgproc.dilate(edges, edges, kernelEdge, new Point(-1, -1), 2);
     thresholdedImages.add(edges);
+    
+    // NEW: Approach 4: Strong gradient edges
+    thresholdedImages.add(strongEdges);
+    
+    // NEW: Approach 5: Morphological gradient (emphasizes boundaries)
+    Mat morphGrad = new Mat();
+    Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+    Imgproc.morphologyEx(bilateral, morphGrad, Imgproc.MORPH_GRADIENT, kernel);
+    Mat morphThresh = new Mat();
+    Imgproc.threshold(morphGrad, morphThresh, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+    thresholdedImages.add(morphThresh);
 
     if (DEBUG_MODE) {
         Imgcodecs.imwrite("debug_threshold1_adaptive.jpg", thresh1);
         Imgcodecs.imwrite("debug_threshold2_otsu.jpg", thresh2);
         Imgcodecs.imwrite("debug_threshold3_edges.jpg", edges);
+        Imgcodecs.imwrite("debug_threshold4_gradient.jpg", strongEdges);
+        Imgcodecs.imwrite("debug_threshold5_morph.jpg", morphThresh);
     }
 
     double imageArea = src.width() * src.height();
+    
+    // NEW: Store candidates with scores for better selection
+    List<CandidateQuad> candidates = new ArrayList<>();
     
     // Try each thresholding approach
     for (int threshIdx = 0; threshIdx < thresholdedImages.size(); threshIdx++) {
@@ -169,12 +201,16 @@ public class ChessBoardDebug {
         
         System.out.println("\n=== Trying threshold approach #" + threshIdx + " ===");
         
-        // Morphological operations
+        // Enhanced morphological operations
         Mat processed = new Mat();
         Mat kernelDilate = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
         Mat kernelErode = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
         
-        Imgproc.dilate(currentThresh, processed, kernelDilate);
+        // NEW: Use closing operation to connect broken edges
+        Mat kernelClose = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(7, 7));
+        Imgproc.morphologyEx(currentThresh, processed, Imgproc.MORPH_CLOSE, kernelClose);
+        
+        Imgproc.dilate(processed, processed, kernelDilate);
         Imgproc.erode(processed, processed, kernelErode);
 
         // Find Contours
@@ -207,7 +243,7 @@ public class ChessBoardDebug {
             System.out.println("\n--- Checking contour #" + i + " (threshold " + threshIdx + ") ---");
             System.out.println("Area: " + area + " (" + (area/imageArea*100) + "% of image)");
 
-            // Adjusted size constraints - chessboard should be 20-85% of image
+            // Adjusted size constraints
             if (area < imageArea * 0.20) {
                 System.out.println("Skipped: Too small (< 20% of image)");
                 continue;
@@ -240,7 +276,7 @@ public class ChessBoardDebug {
                     
                     System.out.println("Found 4-sided polygon with epsilon: " + epsilonFactor);
                     
-                    // VALIDATION: Check if it forms a proper quadrilateral BEFORE scaling
+                    // VALIDATION: Check if it forms a proper quadrilateral
                     if (!isValidQuadrilateral(foundPoints)) {
                         System.out.println("Rejected: Invalid quadrilateral");
                         continue;
@@ -265,19 +301,31 @@ public class ChessBoardDebug {
                     
                     System.out.println("Board center offset: X=" + (centerDistX*100) + "%, Y=" + (centerDistY*100) + "%");
                     
-                    // More lenient centering check (40% instead of 30%)
                     if (centerDistX > 0.40 || centerDistY > 0.40) {
                         System.out.println("Rejected: Board too off-center");
                         continue;
                     }
                     
-                    // Check solidity (area / convex hull area) - should be high for a board
+                    // Check solidity
                     double solidity = area / Imgproc.contourArea(new MatOfPoint(hullPoints));
                     System.out.println("Solidity: " + solidity);
                     if (solidity < 0.85) {
-                        System.out.println("Rejected: Solidity too low (not solid enough)");
+                        System.out.println("Rejected: Solidity too low");
                         continue;
                     }
+                    
+                    // NEW: Calculate comprehensive score
+                    double score = calculateCandidateScore(ordered, area, solidity, centerDistX, centerDistY, src);
+                    
+                    // NEW: Check for chess board pattern inside candidate region
+                    double patternScore = checkChessBoardPattern(src, ordered);
+                    score += patternScore * 0.3; // Weight pattern detection
+                    
+                    // NEW: Check color consistency
+                    double colorConsistency = checkColorConsistency(src, ordered);
+                    score += colorConsistency * 0.2;
+                    
+                    System.out.println("Candidate score: " + score + " (pattern: " + patternScore + ", color: " + colorConsistency + ")");
                     
                     // Scale to original image for visualization
                     Point[] scaledPoints = new Point[4];
@@ -298,20 +346,191 @@ public class ChessBoardDebug {
                     attemptNumber++;
                     
                     // Scale back to original image size
-                    for(Point p : foundPoints) {
-                        p.x = p.x / scale;
-                        p.y = p.y / scale;
+                    Point[] scaledForCandidate = new Point[4];
+                    for(int k = 0; k < 4; k++) {
+                        scaledForCandidate[k] = new Point(foundPoints[k].x / scale, foundPoints[k].y / scale);
                     }
                     
-                    System.out.println("✓✓✓ Found valid board corners! ✓✓✓");
-                    return orderPoints(foundPoints);
+                    // Store candidate with score
+                    candidates.add(new CandidateQuad(orderPoints(scaledForCandidate), score));
                 }
             }
         }
     }
+    
+    // NEW: Select best candidate based on score
+    if (!candidates.isEmpty()) {
+        candidates.sort((c1, c2) -> Double.compare(c2.score, c1.score));
+        CandidateQuad best = candidates.get(0);
+        System.out.println("✓✓✓ Found best board corners with score: " + best.score + " ✓✓✓");
+        return best.corners;
+    }
 
     return null;
 }
+
+// NEW: Helper class to store candidates with scores
+private static class CandidateQuad {
+    Point[] corners;
+    double score;
+    
+    CandidateQuad(Point[] corners, double score) {
+        this.corners = corners;
+        this.score = score;
+    }
+}
+
+// NEW: Calculate comprehensive candidate score
+private static double calculateCandidateScore(Point[] ordered, double area, double solidity, 
+                                               double centerDistX, double centerDistY, Mat src) {
+    double score = 0.0;
+    
+    // Area score (prefer medium-large boards)
+    double areaRatio = area / (src.width() * src.height());
+    if (areaRatio >= 0.25 && areaRatio <= 0.75) {
+        score += 1.0; // Optimal size
+    } else if (areaRatio >= 0.20 && areaRatio <= 0.85) {
+        score += 0.5; // Acceptable size
+    }
+    
+    // Solidity score
+    score += solidity * 0.5;
+    
+    // Centering score
+    double centerScore = 1.0 - (centerDistX + centerDistY) / 2.0;
+    score += centerScore * 0.3;
+    
+    // Aspect ratio score (prefer square-ish)
+    double topWidth = Math.sqrt(Math.pow(ordered[1].x - ordered[0].x, 2) + Math.pow(ordered[1].y - ordered[0].y, 2));
+    double bottomWidth = Math.sqrt(Math.pow(ordered[2].x - ordered[3].x, 2) + Math.pow(ordered[2].y - ordered[3].y, 2));
+    double leftHeight = Math.sqrt(Math.pow(ordered[3].x - ordered[0].x, 2) + Math.pow(ordered[3].y - ordered[0].y, 2));
+    double rightHeight = Math.sqrt(Math.pow(ordered[2].x - ordered[1].x, 2) + Math.pow(ordered[2].y - ordered[1].y, 2));
+    double avgWidth = (topWidth + bottomWidth) / 2.0;
+    double avgHeight = (leftHeight + rightHeight) / 2.0;
+    double aspectRatio = avgWidth / avgHeight;
+    double aspectScore = 1.0 - Math.abs(1.0 - aspectRatio) * 2.0; // Prefer 1:1
+    aspectScore = Math.max(0, aspectScore);
+    score += aspectScore * 0.2;
+    
+    return score;
+}
+
+// NEW: Check for chess board pattern inside candidate region
+private static double checkChessBoardPattern(Mat src, Point[] corners) {
+    try {
+        // Warp the candidate region to a square
+        Point[] ordered = orderPoints(corners);
+        int size = 400;
+        Point[] dstPoints = new Point[]{
+            new Point(0, 0),
+            new Point(size, 0),
+            new Point(size, size),
+            new Point(0, size)
+        };
+        
+        Mat srcMat = new MatOfPoint2f(ordered);
+        Mat dstMat = new MatOfPoint2f(dstPoints);
+        Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
+        
+        Mat warped = new Mat();
+        Imgproc.warpPerspective(src, warped, perspectiveMatrix, new Size(size, size));
+        
+        // Convert to grayscale
+        Mat grayWarped = new Mat();
+        Imgproc.cvtColor(warped, grayWarped, Imgproc.COLOR_BGR2GRAY);
+        
+        // Divide into 8x8 grid and check for alternating pattern
+        int squareSize = size / 8;
+        int alternatingMatches = 0;
+        int totalSquares = 0;
+        
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                Rect squareRect = new Rect(col * squareSize, row * squareSize, squareSize, squareSize);
+                Mat square = new Mat(grayWarped, squareRect);
+                
+                Scalar mean = Core.mean(square);
+                double brightness = mean.val[0];
+                
+                // Check if brightness matches expected pattern (alternating)
+                boolean expectedDark = (row + col) % 2 == 1;
+                boolean isDark = brightness < 128;
+                
+                if (expectedDark == isDark) {
+                    alternatingMatches++;
+                }
+                totalSquares++;
+            }
+        }
+        
+        double patternScore = (double)alternatingMatches / totalSquares;
+        System.out.println("Pattern match: " + (patternScore * 100) + "%");
+        return patternScore;
+    } catch (Exception e) {
+        System.out.println("Pattern check failed: " + e.getMessage());
+        return 0.0;
+    }
+}
+
+// NEW: Check color consistency (board should have relatively uniform color)
+private static double checkColorConsistency(Mat src, Point[] corners) {
+    try {
+        // Sample points inside the quadrilateral
+        Point[] ordered = orderPoints(corners);
+        List<Scalar> samples = new ArrayList<>();
+        
+        // Sample center and midpoints of edges
+        double centerX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) / 4.0;
+        double centerY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) / 4.0;
+        
+        // Sample multiple points
+        for (int i = 0; i < 4; i++) {
+            Point p1 = ordered[i];
+            Point p2 = ordered[(i + 1) % 4];
+            double midX = (p1.x + p2.x) / 2.0;
+            double midY = (p1.y + p2.y) / 2.0;
+            
+            // Sample point between center and midpoint
+            double sampleX = (centerX + midX) / 2.0;
+            double sampleY = (centerY + midY) / 2.0;
+            
+            if (sampleX >= 0 && sampleX < src.width() && sampleY >= 0 && sampleY < src.height()) {
+                Mat sampleMat = new Mat(src, new Rect((int)sampleX, (int)sampleY, 10, 10));
+                Scalar mean = Core.mean(sampleMat);
+                samples.add(mean);
+            }
+        }
+        
+        if (samples.size() < 3) return 0.0;
+        
+        // Calculate variance in color
+        double meanB = 0, meanG = 0, meanR = 0;
+        for (Scalar s : samples) {
+            meanB += s.val[0];
+            meanG += s.val[1];
+            meanR += s.val[2];
+        }
+        meanB /= samples.size();
+        meanG /= samples.size();
+        meanR /= samples.size();
+        
+        double variance = 0;
+        for (Scalar s : samples) {
+            variance += Math.pow(s.val[0] - meanB, 2);
+            variance += Math.pow(s.val[1] - meanG, 2);
+            variance += Math.pow(s.val[2] - meanR, 2);
+        }
+        variance /= (samples.size() * 3);
+        
+        // Lower variance = more consistent = higher score
+        double consistencyScore = 1.0 / (1.0 + variance / 100.0);
+        return consistencyScore;
+    } catch (Exception e) {
+        System.out.println("Color consistency check failed: " + e.getMessage());
+        return 0.0;
+    }
+}
+
     /**
      * Validates that 4 points form a proper quadrilateral.
      * Very lenient check - mainly ensures it's roughly quadrilateral shaped
