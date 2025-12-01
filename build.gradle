@@ -31,6 +31,14 @@ tasks.register('runTestDetect', JavaExec) {
     mainClass = 'com.chessgame.MoveDetector'
 }
 
+tasks.register('runDetectTest', JavaExec) {
+    group = 'application'
+    description = 'Runs the Change Detection test program'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.chessgame.ChangeDetector'
+}
+
+
 dependencies {
     implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
     implementation 'org.openpnp:opencv:4.9.0-0'
