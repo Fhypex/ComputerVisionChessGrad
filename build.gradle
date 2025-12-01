@@ -24,9 +24,16 @@ tasks.register('runTestYolo', JavaExec) {
     mainClass = 'com.chessgame.ChessBoardDebug'
 }
 
+tasks.register('runTestDetect', JavaExec) {
+    group = 'application'
+    description = 'Runs the YOLO test program'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.chessgame.MoveDetector'
+}
+
 dependencies {
-    implementation 'org.openpnp:opencv:4.9.0-0'
     implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
+    implementation 'org.openpnp:opencv:4.9.0-0'
 }
 
 javafx {
