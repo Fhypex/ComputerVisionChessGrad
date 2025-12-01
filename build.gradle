@@ -28,7 +28,7 @@ tasks.register('runDetectTest', JavaExec) {
     group = 'application'
     description = 'Runs the Change Detection test program'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.chessgame.ChangeDetector'
+    mainClass = 'com.chessgame.ChessMoveDetector'
 }
 
 
