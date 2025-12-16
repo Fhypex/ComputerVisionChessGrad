@@ -7,359 +7,1002 @@ import nu.pattern.OpenCV;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class ChessMoveDetector {
 
-    private static final double OUTER_BOARD_SIZE_CM = 44.0;
-    private static final double INNER_BOARD_SIZE_CM = 40.0;
-    private static final double BORDER_WIDTH_CM = (OUTER_BOARD_SIZE_CM - INNER_BOARD_SIZE_CM) / 2.0;
-    private static final int VIRTUAL_RESOLUTION = 800;
+    // Physical board dimensions
+    public static final double OUTER_BOARD_SIZE_CM = 44.0;  // Total board size
+    public static final double INNER_BOARD_SIZE_CM = 40.0;  // Playable 8x8 area
+    public static final double BORDER_WIDTH_CM = (OUTER_BOARD_SIZE_CM - INNER_BOARD_SIZE_CM) / 2.0; // 2cm per side
     
-    // Threshold for detecting significant changes between squares
-    private static final double CHANGE_THRESHOLD = 15.0; // Adjust based on testing
+    public static final int VIRTUAL_RESOLUTION = 800;
+    
+    // Set to true to save intermediate images for debugging
+    public static final boolean DEBUG_MODE = true;
 
-    static {
-        OpenCV.loadLocally();
+    static { 
+        OpenCV.loadLocally(); 
     }
 
     public static void main(String[] args) {
-        // Example usage
-        String image1Path = Paths.get("src", "main", "resources", "tests", "board_before.jpg").toString();
-        String image2Path = Paths.get("src", "main", "resources", "tests", "board_after.jpg").toString();
-        
-        detectMoves(image1Path, image2Path);
-    }
 
-    /**
-     * Detects moves between two chessboard images
-     * @param beforeImagePath Path to the first image
-     * @param afterImagePath Path to the second image
-     */
-    public static void detectMoves(String beforeImagePath, String afterImagePath) {
-        System.out.println("=== Chess Move Detection ===");
-        System.out.println("Before: " + beforeImagePath);
-        System.out.println("After: " + afterImagePath);
-        
-        // Load both images
-        Mat beforeImg = Imgcodecs.imread(beforeImagePath);
-        Mat afterImg = Imgcodecs.imread(afterImagePath);
-        
-        if (beforeImg.empty() || afterImg.empty()) {
-            System.err.println("ERROR: Could not load one or both images");
-            return;
-        }
-        
-        System.out.println("\n--- Processing BEFORE image ---");
-        BoardData beforeBoard = extractBoardData(beforeImg);
-        
-        if (beforeBoard == null) {
-            System.err.println("ERROR: Could not detect board in BEFORE image");
-            return;
-        }
-        
-        System.out.println("\n--- Processing AFTER image ---");
-        BoardData afterBoard = extractBoardData(afterImg);
-        
-        if (afterBoard == null) {
-            System.err.println("ERROR: Could not detect board in AFTER image");
-            return;
-        }
-        
-        // Compare the two boards
-        System.out.println("\n=== Analyzing Changes ===");
-        List<String> changes = compareBoards(beforeBoard, afterBoard);
-        
-        if (changes.isEmpty()) {
-            System.out.println("No significant changes detected.");
-        } else {
-            System.out.println("\nDetected changes:");
-            for (String change : changes) {
-                System.out.println("  " + change);
-            }
-            
-            // Try to infer the move
-            inferMove(changes);
-        }
-    }
+        // 1. SETUP: Load Before and After images
+        String beforeFile = "IMG_9731.jpg";
+        String afterFile = "IMG_9732.jpg";
 
-    /**
-     * Extracts board data including warped image and square images
-     */
-    private static BoardData extractBoardData(Mat src) {
-        // Detect board corners (reusing logic from ChessBoardDebug)
-        Point[] outerCorners = findBoardCorners(src);
-        
+        String beforePath = Paths.get("src", "main", "resources", "tests", beforeFile).toString();
+        String inputImagePath = Paths.get("src", "main", "resources", "tests", afterFile).toString(); // Using 'after' as main input
+        String outputImagePath = Paths.get("output", "after_detected.jpg").toString();
+        String debugImagePath = Paths.get("output", "debug_all_attempts.jpg").toString();
+        String squaresOutputDir = Paths.get("output", "squares").toString();
+
+        Mat imgBefore = Imgcodecs.imread(beforePath);
+        Mat imgAfter = Imgcodecs.imread(inputImagePath); // 'src' in original code
+
+        if (imgBefore.empty() || imgAfter.empty()) {
+            System.err.println("Error: Could not read one or both images.");
+            System.err.println("Check: " + beforePath);
+            System.err.println("Check: " + inputImagePath);
+            return;
+        }
+
+        System.out.println("Images loaded. Resolution: " + imgAfter.width() + "x" + imgAfter.height());
+
+        // Create output directory
+        new java.io.File(squaresOutputDir).mkdirs();
+
+        // 2. DETECT: Find corners using the 'After' image (Source of Truth)
+        Mat debugImg = imgAfter.clone();
+        Point[] outerCorners = findBoardCorners(imgAfter, debugImg);
+
+        // Save debug image
+        Imgcodecs.imwrite(debugImagePath, debugImg);
+
         if (outerCorners == null) {
-            return null;
+            System.err.println("FAILED: Could not detect a chessboard on the 'After' image.");
+            return;
         }
-        
-        System.out.println("✓ Board detected successfully");
-        
-        // Calculate inner corners
+
+        System.out.println("Success! Outer Board Detected.");
+
+        // Draw detection on output image
+        drawCorners(imgAfter, outerCorners, new Scalar(0, 255, 0), "Outer");
         Point[] innerCorners = calculateInnerCorners(outerCorners);
-        
-        // Warp the board to standard perspective
-        Mat warpedBoard = warpBoard(src, outerCorners);
-        
-        // Extract all 64 squares
-        Mat[] squares = extractAllSquares(warpedBoard);
-        
-        return new BoardData(warpedBoard, squares, outerCorners, innerCorners);
+        drawCorners(imgAfter, innerCorners, new Scalar(255, 0, 0), "Inner");
+        Imgcodecs.imwrite(outputImagePath, imgAfter);
+
+        // 3. WARP: Align both images to the exact same perspective
+        // We use a helper method to ensure both use the exact same matrix
+        Mat warpedBefore = warpBoardStandardized(imgBefore, outerCorners);
+        Mat warpedAfter = warpBoardStandardized(imgAfter, outerCorners);
+
+        if (DEBUG_MODE) {
+            Imgcodecs.imwrite("output/debug_warped_before.jpg", warpedBefore);
+            Imgcodecs.imwrite("output/debug_warped_after.jpg", warpedAfter);
+        }
+
+        // 4. DETECT CHANGES: Compare the squares
+        System.out.println("\n=== Analyzing Changes ===");
+        List<String> changedSquares = detectSquareChanges(warpedBefore, warpedAfter);
+
+        System.out.println("\n-----------------------------");
+        System.out.println("DETECTED MOVEMENTS: " + changedSquares);
+        System.out.println("-----------------------------");
+
+        // 5. EXTRACT: Save individual images (Original logic preserved)
+        // We pass the original 'imgAfter' here as your extraction logic handles the warping internally
+        java.io.File f = new java.io.File(inputImagePath);
+        String baseFileName = f.getName().replaceFirst("[.][^.]+$", "");
+        System.out.println("\n=== Extracting individual squares from 'After' image ===");
+        extractSquareImages(Imgcodecs.imread(inputImagePath), outerCorners, innerCorners, squaresOutputDir, baseFileName);
     }
 
     /**
-     * Warps the board to a standard top-down view
+     * NEW: Standardized warping to ensure Before/After match pixel-for-pixel.
+     * Uses the exact same geometry logic as extractSquareImages (Sky Buffer).
      */
-    private static Mat warpBoard(Mat src, Point[] outerCorners) {
+    public static Mat warpBoardStandardized(Mat src, Point[] outerCorners) {
         int warpedWidth = VIRTUAL_RESOLUTION;
-        int skyBuffer = (int)(warpedWidth * 0.5);
+        int skyBuffer = (int)(warpedWidth * 0.5); 
         int warpedHeight = warpedWidth + skyBuffer;
-        
+
         Point[] dstPoints = new Point[]{
-            new Point(0, skyBuffer),
-            new Point(warpedWidth, skyBuffer),
-            new Point(warpedWidth, warpedWidth + skyBuffer),
-            new Point(0, warpedWidth + skyBuffer)
+                new Point(0, skyBuffer),                  
+                new Point(warpedWidth, skyBuffer),        
+                new Point(warpedWidth, warpedWidth + skyBuffer), 
+                new Point(0, warpedWidth + skyBuffer)     
         };
-        
+
         Mat srcMat = new MatOfPoint2f(outerCorners);
         Mat dstMat = new MatOfPoint2f(dstPoints);
         Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
-        
+
         Mat warped = new Mat();
         Imgproc.warpPerspective(src, warped, perspectiveMatrix, new Size(warpedWidth, warpedHeight));
-        
         return warped;
     }
 
     /**
-     * Extracts all 64 squares from a warped board
-     * Returns array indexed 0-63 (A8, B8, ..., G1, H1)
+     * NEW: Detects changes between two already-warped board images.
      */
-    private static Mat[] extractAllSquares(Mat warpedBoard) {
-        Mat[] squares = new Mat[64];
+    public static List<String> detectSquareChanges(Mat warpedBefore, Mat warpedAfter) {
+        List<String> changes = new ArrayList<>();
         
-        int warpedWidth = VIRTUAL_RESOLUTION;
-        int skyBuffer = (int)(warpedWidth * 0.5);
-        
+        // Geometry calculation (Replicating your extractSquareImages logic)
         double outerSize = OUTER_BOARD_SIZE_CM;
         double innerSize = INNER_BOARD_SIZE_CM;
         double borderRatio = BORDER_WIDTH_CM / outerSize;
         
-        double innerStartPixel = warpedWidth * borderRatio;
-        double innerSizePixel = warpedWidth * (innerSize / outerSize);
+        double innerStartPixel = VIRTUAL_RESOLUTION * borderRatio;
+        double innerSizePixel = VIRTUAL_RESOLUTION * (innerSize / outerSize);
         double squareSize = innerSizePixel / 8.0;
         
-        int index = 0;
+        // We must account for the skyBuffer added during warping
+        int skyBuffer = (int)(VIRTUAL_RESOLUTION * 0.5); 
+
+        Mat diffViz = warpedAfter.clone(); // For debug visualization
+
         for (int row = 0; row < 8; row++) {
             for (int col = 0; col < 8; col++) {
+                
+                // Calculate Grid Coordinates
                 double baseX = innerStartPixel + (col * squareSize);
                 double baseY = skyBuffer + innerStartPixel + (row * squareSize);
-                
-                int x = (int)baseX;
-                int y = (int)baseY;
-                int width = (int)squareSize;
-                int height = (int)squareSize;
-                
-                // Boundary check
-                if (x + width > warpedBoard.width()) width = warpedBoard.width() - x;
-                if (y + height > warpedBoard.height()) height = warpedBoard.height() - y;
-                
-                Rect squareRect = new Rect(x, y, width, height);
-                squares[index] = new Mat(warpedBoard, squareRect).clone();
-                index++;
+
+                // DEFINE ROI for COMPARISON:
+                // strictRect: We strictly look at the "floor" of the square.
+                // We shrink slightly (inset) to avoid border lines triggering changes.
+                int inset = 5; 
+                Rect strictRect = new Rect(
+                    (int)baseX + inset, 
+                    (int)baseY + inset, 
+                    (int)squareSize - (2*inset), 
+                    (int)squareSize - (2*inset)
+                );
+
+                // Safety check
+                if (strictRect.x < 0 || strictRect.y < 0 || 
+                    strictRect.x + strictRect.width > warpedBefore.width() || 
+                    strictRect.y + strictRect.height > warpedBefore.height()) continue;
+
+                Mat roiBefore = new Mat(warpedBefore, strictRect);
+                Mat roiAfter = new Mat(warpedAfter, strictRect);
+
+                // Calculate Difference
+                // 1. Convert to gray
+                Mat grayBefore = new Mat();
+                Mat grayAfter = new Mat();
+                Imgproc.cvtColor(roiBefore, grayBefore, Imgproc.COLOR_BGR2GRAY);
+                Imgproc.cvtColor(roiAfter, grayAfter, Imgproc.COLOR_BGR2GRAY);
+
+                // 2. Blur to remove camera noise
+                Imgproc.GaussianBlur(grayBefore, grayBefore, new Size(5,5), 0);
+                Imgproc.GaussianBlur(grayAfter, grayAfter, new Size(5,5), 0);
+
+                // 3. Absolute Difference
+                Mat diff = new Mat();
+                Core.absdiff(grayBefore, grayAfter, diff);
+
+                // 4. Threshold
+                Scalar meanDiff = Core.mean(diff);
+                double diffScore = meanDiff.val[0];
+
+                String chessNotation = (char)('A' + col) + "" + (8 - row);
+                // System.out.println(chessNotation + " Diff Score: " + diffScore); // Uncomment to debug sensitivity
+
+                // THRESHOLD: Adjust this if detection is too sensitive or not sensitive enough.
+                // 25.0 is a reasonable starting point for "piece moved" vs "lighting flicker"
+                if (diffScore > 10.0) {
+                    changes.add(chessNotation);
+                    // Draw red rectangle on debug image
+                    Imgproc.rectangle(diffViz, strictRect, new Scalar(0, 0, 255), 2);
+                } else {
+                    // Draw faint green for unchanged
+                    Imgproc.rectangle(diffViz, strictRect, new Scalar(0, 255, 0, 50), 1);
+                }
             }
         }
         
-        return squares;
-    }
-
-    /**
-     * Compares two boards and returns list of changed squares
-     */
-    private static List<String> compareBoards(BoardData before, BoardData after) {
-        List<String> changes = new ArrayList<>();
-        
-        for (int i = 0; i < 64; i++) {
-            double difference = calculateSquareDifference(before.squares[i], after.squares[i]);
-            
-            int row = i / 8;
-            int col = i % 8;
-            String squareName = "" + (char)('a' + col) + (8 - row);
-            
-            if (difference > CHANGE_THRESHOLD) {
-                changes.add(squareName + " (diff: " + String.format("%.2f", difference) + ")");
-                System.out.println("Change detected at " + squareName + ": " + String.format("%.2f", difference));
-            }
+        if (DEBUG_MODE) {
+            Imgcodecs.imwrite("output/debug_change_heatmap.jpg", diffViz);
         }
         
         return changes;
     }
 
-    /**
-     * Calculates the difference between two square images
-     * Returns a value representing how different they are
-     */
-    private static double calculateSquareDifference(Mat square1, Mat square2) {
-        // Convert to grayscale
-        Mat gray1 = new Mat();
-        Mat gray2 = new Mat();
-        Imgproc.cvtColor(square1, gray1, Imgproc.COLOR_BGR2GRAY);
-        Imgproc.cvtColor(square2, gray2, Imgproc.COLOR_BGR2GRAY);
-        
-        // Calculate absolute difference
-        Mat diff = new Mat();
-        Core.absdiff(gray1, gray2, diff);
-        
-        // Calculate mean difference
-        Scalar meanDiff = Core.mean(diff);
-        
-        return meanDiff.val[0];
+    // =========================================================
+    // EXISTING LOGIC BELOW (COPIED EXACTLY AS REQUESTED)
+    // =========================================================
+
+    public static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
+    // Downscale for better detection
+    double processingWidth = 600.0;
+    double scale = 1.0;
+    Mat src = new Mat();
+
+    if (originalSrc.width() > processingWidth) {
+        scale = processingWidth / originalSrc.width();
+        Imgproc.resize(originalSrc, src, new Size(), scale, scale, Imgproc.INTER_AREA);
+        System.out.println("Downscaled image for processing (Scale factor: " + scale + ")");
+    } else {
+        originalSrc.copyTo(src);
     }
 
-    /**
-     * Tries to infer the chess move from the list of changes
-     */
-    private static void inferMove(List<String> changes) {
-        System.out.println("\n=== Move Inference ===");
-        
-        if (changes.size() == 2) {
-            // Most common case: piece moved from one square to another
-            String from = changes.get(0).split(" ")[0];
-            String to = changes.get(1).split(" ")[0];
-            System.out.println("Likely move: " + from + " → " + to);
-        } else if (changes.size() == 4) {
-            // Possible castling (king and rook both move)
-            System.out.println("Possible castling detected (4 squares changed)");
-            System.out.println("Changed squares: " + changes);
-        } else if (changes.size() == 3) {
-            // Possible en passant (pawn captures, captured pawn removed)
-            System.out.println("Possible en passant detected (3 squares changed)");
-            System.out.println("Changed squares: " + changes);
-        } else {
-            System.out.println("Complex change detected (" + changes.size() + " squares)");
-            System.out.println("Changed squares: " + changes);
-        }
-    }
-
-    // ==================== Helper Methods from ChessBoardDebug ====================
+    Mat gray = new Mat();
+    Mat blurred = new Mat();
     
-    private static Point[] findBoardCorners(Mat src) {
-        // Simplified version - you can copy the full implementation from ChessBoardDebug
-        // For now, returning a basic implementation
+    // 1. Grayscale
+    Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
+    
+    // 2. Enhanced preprocessing with better noise reduction
+    Imgproc.GaussianBlur(gray, blurred, new Size(7, 7), 0);
+    
+    // NEW: Add bilateral filter to reduce noise while preserving edges
+    Mat bilateral = new Mat();
+    Imgproc.bilateralFilter(blurred, bilateral, 9, 75, 75);
+    
+    // NEW: Detect strong edges using gradient magnitude
+    Mat gradX = new Mat();
+    Mat gradY = new Mat();
+    Mat gradMag = new Mat();
+    Imgproc.Sobel(bilateral, gradX, CvType.CV_64F, 1, 0, 3);
+    Imgproc.Sobel(bilateral, gradY, CvType.CV_64F, 0, 1, 3);
+    Core.magnitude(gradX, gradY, gradMag);
+    Mat gradMag8U = new Mat();
+    gradMag.convertTo(gradMag8U, CvType.CV_8U);
+    
+    // NEW: Threshold gradient magnitude to get strong edges only
+    Mat strongEdges = new Mat();
+    Imgproc.threshold(gradMag8U, strongEdges, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+    
+    // 3. Try multiple thresholding approaches
+    List<Mat> thresholdedImages = new ArrayList<>();
+    
+    // Approach 1: Adaptive threshold (existing)
+    Mat thresh1 = new Mat();
+    Imgproc.adaptiveThreshold(bilateral, thresh1, 255, 
+            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            Imgproc.THRESH_BINARY_INV, 21, 5);
+    thresholdedImages.add(thresh1);
+    
+    // Approach 2: Otsu's thresholding
+    Mat thresh2 = new Mat();
+    Imgproc.threshold(bilateral, thresh2, 0, 255, 
+            Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU);
+    thresholdedImages.add(thresh2);
+    
+    // Approach 3: Canny edge detection (improved)
+    Mat edges = new Mat();
+    Imgproc.Canny(bilateral, edges, 50, 150);
+    Mat kernelEdge = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+    Imgproc.dilate(edges, edges, kernelEdge, new Point(-1, -1), 2);
+    thresholdedImages.add(edges);
+    
+    // NEW: Approach 4: Strong gradient edges
+    thresholdedImages.add(strongEdges);
+    
+    // NEW: Approach 5: Morphological gradient (emphasizes boundaries)
+    Mat morphGrad = new Mat();
+    Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+    Imgproc.morphologyEx(bilateral, morphGrad, Imgproc.MORPH_GRADIENT, kernel);
+    Mat morphThresh = new Mat();
+    Imgproc.threshold(morphGrad, morphThresh, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+    thresholdedImages.add(morphThresh);
+
+    if (DEBUG_MODE) {
+        Imgcodecs.imwrite("debug_threshold1_adaptive.jpg", thresh1);
+        Imgcodecs.imwrite("debug_threshold2_otsu.jpg", thresh2);
+        Imgcodecs.imwrite("debug_threshold3_edges.jpg", edges);
+        Imgcodecs.imwrite("debug_threshold4_gradient.jpg", strongEdges);
+        Imgcodecs.imwrite("debug_threshold5_morph.jpg", morphThresh);
+    }
+
+    double imageArea = src.width() * src.height();
+    
+    // NEW: Store candidates with scores for better selection
+    List<CandidateQuad> candidates = new ArrayList<>();
+    
+    // Try each thresholding approach
+    for (int threshIdx = 0; threshIdx < thresholdedImages.size(); threshIdx++) {
+        Mat currentThresh = thresholdedImages.get(threshIdx);
         
-        Mat gray = new Mat();
-        Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
+        System.out.println("\n=== Trying threshold approach #" + threshIdx + " ===");
         
-        Mat blurred = new Mat();
-        Imgproc.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+        // Enhanced morphological operations
+        Mat processed = new Mat();
+        Mat kernelDilate = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
+        Mat kernelErode = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
         
-        Mat edges = new Mat();
-        Imgproc.Canny(blurred, edges, 50, 150);
+        // NEW: Use closing operation to connect broken edges
+        Mat kernelClose = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(7, 7));
+        Imgproc.morphologyEx(currentThresh, processed, Imgproc.MORPH_CLOSE, kernelClose);
         
+        Imgproc.dilate(processed, processed, kernelDilate);
+        Imgproc.erode(processed, processed, kernelErode);
+
+        // Find Contours
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = new Mat();
-        Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-        
-        double imageArea = src.width() * src.height();
-        
-        // Find largest quadrilateral
-        for (MatOfPoint contour : contours) {
+        Imgproc.findContours(processed, contours, hierarchy, 
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+
+        // Sort by area
+        contours.sort((c1, c2) -> Double.compare(Imgproc.contourArea(c2), Imgproc.contourArea(c1)));
+
+        int attemptNumber = threshIdx * 10;
+        Scalar[] attemptColors = new Scalar[]{
+            new Scalar(255, 0, 0),    // Blue
+            new Scalar(0, 255, 255),  // Yellow
+            new Scalar(255, 0, 255),  // Magenta
+            new Scalar(0, 165, 255),  // Orange
+            new Scalar(255, 255, 0),  // Cyan
+            new Scalar(128, 0, 128),  // Purple
+            new Scalar(0, 255, 0),    // Green
+            new Scalar(255, 128, 0),  // Sky Blue
+            new Scalar(128, 128, 128),// Gray
+            new Scalar(200, 200, 200) // Light Gray
+        };
+
+        for (int i = 0; i < Math.min(contours.size(), 15); i++) {
+            MatOfPoint contour = contours.get(i);
             double area = Imgproc.contourArea(contour);
-            
-            if (area < imageArea * 0.20 || area > imageArea * 0.85) {
+
+            System.out.println("\n--- Checking contour #" + i + " (threshold " + threshIdx + ") ---");
+            System.out.println("Area: " + area + " (" + (area/imageArea*100) + "% of image)");
+
+            // Adjusted size constraints
+            if (area < imageArea * 0.20) {
+                System.out.println("Skipped: Too small (< 20% of image)");
                 continue;
             }
             
-            MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
-            double peri = Imgproc.arcLength(contour2f, true);
-            MatOfPoint2f approx = new MatOfPoint2f();
-            Imgproc.approxPolyDP(contour2f, approx, 0.02 * peri, true);
+            if (area > imageArea * 0.85) {
+                System.out.println("Skipped: Too large (> 85% of image)");
+                continue;
+            }
+
+            // Convex hull and polygon approximation
+            MatOfInt hullIdx = new MatOfInt();
+            Imgproc.convexHull(contour, hullIdx);
             
-            if (approx.total() == 4) {
-                Point[] pts = approx.toArray();
-                return orderPoints(pts);
+            Point[] contourArray = contour.toArray();
+            Point[] hullPoints = new Point[hullIdx.rows()];
+            for(int j=0; j < hullIdx.rows(); j++) {
+                hullPoints[j] = contourArray[hullIdx.toArray()[j]];
+            }
+            MatOfPoint2f hull2f = new MatOfPoint2f(hullPoints);
+
+            // Try multiple epsilon values
+            for (double epsilonFactor = 0.015; epsilonFactor <= 0.10; epsilonFactor += 0.005) {
+                double peri = Imgproc.arcLength(hull2f, true);
+                MatOfPoint2f approx = new MatOfPoint2f();
+                Imgproc.approxPolyDP(hull2f, approx, epsilonFactor * peri, true);
+
+                if (approx.total() == 4) {
+                    Point[] foundPoints = approx.toArray();
+                    
+                    System.out.println("Found 4-sided polygon with epsilon: " + epsilonFactor);
+                    
+                    // VALIDATION: Check if it forms a proper quadrilateral
+                    if (!isValidQuadrilateral(foundPoints)) {
+                        System.out.println("Rejected: Invalid quadrilateral");
+                        continue;
+                    }
+                    
+                    // Additional validation: Check corner angles
+                    Point[] ordered = orderPoints(foundPoints);
+                    if (!hasReasonableAngles(ordered)) {
+                        System.out.println("Rejected: Corner angles too extreme");
+                        continue;
+                    }
+                    
+                    // Check if board is reasonably centered
+                    double centerX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) / 4.0;
+                    double centerY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) / 4.0;
+                    
+                    double imgCenterX = src.width() / 2.0;
+                    double imgCenterY = src.height() / 2.0;
+                    
+                    double centerDistX = Math.abs(centerX - imgCenterX) / src.width();
+                    double centerDistY = Math.abs(centerY - imgCenterY) / src.height();
+                    
+                    System.out.println("Board center offset: X=" + (centerDistX*100) + "%, Y=" + (centerDistY*100) + "%");
+                    
+                    if (centerDistX > 0.40 || centerDistY > 0.40) {
+                        System.out.println("Rejected: Board too off-center");
+                        continue;
+                    }
+                    
+                    // Check solidity
+                    double solidity = area / Imgproc.contourArea(new MatOfPoint(hullPoints));
+                    System.out.println("Solidity: " + solidity);
+                    if (solidity < 0.85) {
+                        System.out.println("Rejected: Solidity too low");
+                        continue;
+                    }
+                    
+                    // NEW: Calculate comprehensive score
+                    double score = calculateCandidateScore(ordered, area, solidity, centerDistX, centerDistY, src);
+                    
+                    // NEW: Check for chess board pattern inside candidate region
+                    double patternScore = checkChessBoardPattern(src, ordered);
+                    score += patternScore * 0.3; // Weight pattern detection
+                    
+                    // NEW: Check color consistency
+                    double colorConsistency = checkColorConsistency(src, ordered);
+                    score += colorConsistency * 0.2;
+                    
+                    System.out.println("Candidate score: " + score + " (pattern: " + patternScore + ", color: " + colorConsistency + ")");
+                    
+                    // Scale to original image for visualization
+                    Point[] scaledPoints = new Point[4];
+                    for(int k = 0; k < 4; k++) {
+                        scaledPoints[k] = new Point(foundPoints[k].x / scale, foundPoints[k].y / scale);
+                    }
+                    
+                    // Draw this attempt on debug image
+                    Scalar color = attemptColors[attemptNumber % attemptColors.length];
+                    Point[] orderedScaled = orderPoints(scaledPoints);
+                    for (int k = 0; k < 4; k++) {
+                        Imgproc.line(debugImg, orderedScaled[k], orderedScaled[(k + 1) % 4], color, 2);
+                        Imgproc.circle(debugImg, orderedScaled[k], 8, color, -1);
+                        Imgproc.putText(debugImg, "A" + attemptNumber + "C" + k, 
+                                        new Point(orderedScaled[k].x + 10, orderedScaled[k].y - 10),
+                                        Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
+                    }
+                    attemptNumber++;
+                    
+                    // Scale back to original image size
+                    Point[] scaledForCandidate = new Point[4];
+                    for(int k = 0; k < 4; k++) {
+                        scaledForCandidate[k] = new Point(foundPoints[k].x / scale, foundPoints[k].y / scale);
+                    }
+                    
+                    // Store candidate with score
+                    candidates.add(new CandidateQuad(orderPoints(scaledForCandidate), score));
+                }
+            }
+        }
+    }
+    
+    // NEW: Select best candidate based on score
+    if (!candidates.isEmpty()) {
+        candidates.sort((c1, c2) -> Double.compare(c2.score, c1.score));
+        CandidateQuad best = candidates.get(0);
+        System.out.println("✓✓✓ Found best board corners with score: " + best.score + " ✓✓✓");
+        return best.corners;
+    }
+
+    return null;
+}
+
+// NEW: Helper class to store candidates with scores
+public static class CandidateQuad {
+    Point[] corners;
+    double score;
+    
+    CandidateQuad(Point[] corners, double score) {
+        this.corners = corners;
+        this.score = score;
+    }
+}
+
+// NEW: Calculate comprehensive candidate score
+public static double calculateCandidateScore(Point[] ordered, double area, double solidity, 
+                                            double centerDistX, double centerDistY, Mat src) {
+    double score = 0.0;
+    
+    // Area score (prefer medium-large boards)
+    double areaRatio = area / (src.width() * src.height());
+    if (areaRatio >= 0.25 && areaRatio <= 0.75) {
+        score += 1.0; // Optimal size
+    } else if (areaRatio >= 0.20 && areaRatio <= 0.85) {
+        score += 0.5; // Acceptable size
+    }
+    
+    // Solidity score
+    score += solidity * 0.5;
+    
+    // Centering score
+    double centerScore = 1.0 - (centerDistX + centerDistY) / 2.0;
+    score += centerScore * 0.3;
+    
+    // Aspect ratio score (prefer square-ish)
+    double topWidth = Math.sqrt(Math.pow(ordered[1].x - ordered[0].x, 2) + Math.pow(ordered[1].y - ordered[0].y, 2));
+    double bottomWidth = Math.sqrt(Math.pow(ordered[2].x - ordered[3].x, 2) + Math.pow(ordered[2].y - ordered[3].y, 2));
+    double leftHeight = Math.sqrt(Math.pow(ordered[3].x - ordered[0].x, 2) + Math.pow(ordered[3].y - ordered[0].y, 2));
+    double rightHeight = Math.sqrt(Math.pow(ordered[2].x - ordered[1].x, 2) + Math.pow(ordered[2].y - ordered[1].y, 2));
+    double avgWidth = (topWidth + bottomWidth) / 2.0;
+    double avgHeight = (leftHeight + rightHeight) / 2.0;
+    double aspectRatio = avgWidth / avgHeight;
+    double aspectScore = 1.0 - Math.abs(1.0 - aspectRatio) * 2.0; // Prefer 1:1
+    aspectScore = Math.max(0, aspectScore);
+    score += aspectScore * 0.2;
+    
+    return score;
+}
+
+// NEW: Check for chess board pattern inside candidate region
+public static double checkChessBoardPattern(Mat src, Point[] corners) {
+    try {
+        // Warp the candidate region to a square
+        Point[] ordered = orderPoints(corners);
+        int size = 400;
+        Point[] dstPoints = new Point[]{
+            new Point(0, 0),
+            new Point(size, 0),
+            new Point(size, size),
+            new Point(0, size)
+        };
+        
+        Mat srcMat = new MatOfPoint2f(ordered);
+        Mat dstMat = new MatOfPoint2f(dstPoints);
+        Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
+        
+        Mat warped = new Mat();
+        Imgproc.warpPerspective(src, warped, perspectiveMatrix, new Size(size, size));
+        
+        // Convert to grayscale
+        Mat grayWarped = new Mat();
+        Imgproc.cvtColor(warped, grayWarped, Imgproc.COLOR_BGR2GRAY);
+        
+        // Divide into 8x8 grid and check for alternating pattern
+        int squareSize = size / 8;
+        int alternatingMatches = 0;
+        int totalSquares = 0;
+        
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                Rect squareRect = new Rect(col * squareSize, row * squareSize, squareSize, squareSize);
+                Mat square = new Mat(grayWarped, squareRect);
+                
+                Scalar mean = Core.mean(square);
+                double brightness = mean.val[0];
+                
+                // Check if brightness matches expected pattern (alternating)
+                boolean expectedDark = (row + col) % 2 == 1;
+                boolean isDark = brightness < 128;
+                
+                if (expectedDark == isDark) {
+                    alternatingMatches++;
+                }
+                totalSquares++;
             }
         }
         
-        return null;
+        double patternScore = (double)alternatingMatches / totalSquares;
+        System.out.println("Pattern match: " + (patternScore * 100) + "%");
+        return patternScore;
+    } catch (Exception e) {
+        System.out.println("Pattern check failed: " + e.getMessage());
+        return 0.0;
+    }
+}
+
+// NEW: Check color consistency (board should have relatively uniform color)
+public static double checkColorConsistency(Mat src, Point[] corners) {
+    try {
+        // Sample points inside the quadrilateral
+        Point[] ordered = orderPoints(corners);
+        List<Scalar> samples = new ArrayList<>();
+        
+        // Sample center and midpoints of edges
+        double centerX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) / 4.0;
+        double centerY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) / 4.0;
+        
+        // Sample multiple points
+        for (int i = 0; i < 4; i++) {
+            Point p1 = ordered[i];
+            Point p2 = ordered[(i + 1) % 4];
+            double midX = (p1.x + p2.x) / 2.0;
+            double midY = (p1.y + p2.y) / 2.0;
+            
+            // Sample point between center and midpoint
+            double sampleX = (centerX + midX) / 2.0;
+            double sampleY = (centerY + midY) / 2.0;
+            
+            if (sampleX >= 0 && sampleX < src.width() && sampleY >= 0 && sampleY < src.height()) {
+                Mat sampleMat = new Mat(src, new Rect((int)sampleX, (int)sampleY, 10, 10));
+                Scalar mean = Core.mean(sampleMat);
+                samples.add(mean);
+            }
+        }
+        
+        if (samples.size() < 3) return 0.0;
+        
+        // Calculate variance in color
+        double meanB = 0, meanG = 0, meanR = 0;
+        for (Scalar s : samples) {
+            meanB += s.val[0];
+            meanG += s.val[1];
+            meanR += s.val[2];
+        }
+        meanB /= samples.size();
+        meanG /= samples.size();
+        meanR /= samples.size();
+        
+        double variance = 0;
+        for (Scalar s : samples) {
+            variance += Math.pow(s.val[0] - meanB, 2);
+            variance += Math.pow(s.val[1] - meanG, 2);
+            variance += Math.pow(s.val[2] - meanR, 2);
+        }
+        variance /= (samples.size() * 3);
+        
+        // Lower variance = more consistent = higher score
+        double consistencyScore = 1.0 / (1.0 + variance / 100.0);
+        return consistencyScore;
+    } catch (Exception e) {
+        System.out.println("Color consistency check failed: " + e.getMessage());
+        return 0.0;
+    }
+}
+
+    /**
+     * Validates that 4 points form a proper quadrilateral.
+     * Very lenient check - mainly ensures it's roughly quadrilateral shaped
+     * and filters out obvious non-board shapes.
+     */
+    public static boolean isValidQuadrilateral(Point[] pts) {
+    Point[] ordered = orderPoints(pts);
+    // ordered: [TL, TR, BR, BL]
+    
+    Point tl = ordered[0];
+    Point tr = ordered[1];
+    Point br = ordered[2];
+    Point bl = ordered[3];
+    
+    // Calculate dimensions
+    double topWidth = Math.sqrt(Math.pow(tr.x - tl.x, 2) + Math.pow(tr.y - tl.y, 2));
+    double bottomWidth = Math.sqrt(Math.pow(br.x - bl.x, 2) + Math.pow(br.y - bl.y, 2));
+    double leftHeight = Math.sqrt(Math.pow(bl.x - tl.x, 2) + Math.pow(bl.y - tl.y, 2));
+    double rightHeight = Math.sqrt(Math.pow(br.x - tr.x, 2) + Math.pow(br.y - tr.y, 2));
+    
+    double avgWidth = (topWidth + bottomWidth) / 2.0;
+    double avgHeight = (leftHeight + rightHeight) / 2.0;
+    
+    System.out.println("Quadrilateral check:");
+    System.out.println("  Top width: " + topWidth + ", Bottom width: " + bottomWidth);
+    System.out.println("  Left height: " + leftHeight + ", Right height: " + rightHeight);
+    
+    // Check 1: Width ratio shouldn't be too extreme
+    double widthRatio = Math.min(topWidth, bottomWidth) / Math.max(topWidth, bottomWidth);
+    if (widthRatio < 0.5) { // More strict than 0.3
+        System.out.println("Failed: Width ratio too extreme: " + widthRatio);
+        return false;
+    }
+    
+    // Check 2: Height ratio shouldn't be too extreme
+    double heightRatio = Math.min(leftHeight, rightHeight) / Math.max(leftHeight, rightHeight);
+    if (heightRatio < 0.5) { // More strict than 0.3
+        System.out.println("Failed: Height ratio too extreme: " + heightRatio);
+        return false;
+    }
+    
+    // Check 3: Aspect ratio should be somewhat square-ish
+    double aspectRatio = avgWidth / avgHeight;
+    if (aspectRatio < 0.6 || aspectRatio > 1.7) { // More strict range
+        System.out.println("Failed: Aspect ratio not square enough: " + aspectRatio);
+        return false;
+    }
+    
+    // Check 4: Diagonals should be roughly equal (square property)
+    double diag1 = Math.sqrt(Math.pow(br.x - tl.x, 2) + Math.pow(br.y - tl.y, 2));
+    double diag2 = Math.sqrt(Math.pow(bl.x - tr.x, 2) + Math.pow(bl.y - tr.y, 2));
+    double diagRatio = Math.min(diag1, diag2) / Math.max(diag1, diag2);
+    
+    System.out.println("Diagonal ratio: " + diagRatio);
+    if (diagRatio < 0.8) {
+        System.out.println("Failed: Diagonals too unequal: " + diagRatio);
+        return false;
     }
 
-    private static Point[] orderPoints(Point[] pts) {
-        Point[] result = new Point[4];
-        List<Point> points = new ArrayList<>();
-        for (Point p : pts) points.add(p);
+    // --- NEW CHECK: Bottom Edge Slope ---
+    // The vector connecting Bottom-Left (bl) and Bottom-Right (br) should be roughly horizontal.
+    double bottomDy = Math.abs(br.y - bl.y);
+    double bottomDx = Math.abs(br.x - bl.x);
+    
+    if (bottomDx > 1.0) { // Avoid division by zero
+        double bottomSlope = bottomDy / bottomDx;
+        System.out.println("Bottom edge slope: " + bottomSlope);
         
+        // Threshold 0.15 is approximately 8.5 degrees.
+        // This ensures the bottom edge is "close slope" (horizontal) with "small error place".
+        if (bottomSlope > 0.15) {
+            System.out.println("Failed: Bottom edge not horizontal enough (Slope: " + bottomSlope + " > 0.15)");
+            return false;
+        }
+    }
+    
+    System.out.println("✓ Validation passed - proper quadrilateral detected");
+    return true;
+}
+
+    public static Point[] orderPoints(Point[] pts) {
+        Point[] result = new Point[4];
+        List<Point> points = Arrays.asList(pts);
+        
+        // Sort by Y coordinate
         points.sort((p1, p2) -> Double.compare(p1.y, p2.y));
         
+        // Top 2 points
         List<Point> top = new ArrayList<>(points.subList(0, 2));
         top.sort((p1, p2) -> Double.compare(p1.x, p2.x));
         result[0] = top.get(0); // TL
         result[1] = top.get(1); // TR
         
+        // Bottom 2 points
         List<Point> bottom = new ArrayList<>(points.subList(2, 4));
         bottom.sort((p1, p2) -> Double.compare(p1.x, p2.x));
         result[3] = bottom.get(0); // BL
         result[2] = bottom.get(1); // BR
-        
+
         return result;
     }
 
-    private static Point[] calculateInnerCorners(Point[] outerCorners) {
-        Point tl = outerCorners[0];
-        Point tr = outerCorners[1];
-        Point br = outerCorners[2];
-        Point bl = outerCorners[3];
-        
-        double shrinkRatio = INNER_BOARD_SIZE_CM / OUTER_BOARD_SIZE_CM;
-        double baseOffsetRatio = (1.0 - shrinkRatio) / 2.0;
-        
-        double topRatio = baseOffsetRatio * 0.84;
-        double bottomRatio = baseOffsetRatio * 1.16;
-        double sideRatio = baseOffsetRatio;
-        
-        Point[] innerCorners = new Point[4];
-        
-        innerCorners[0] = new Point(
-            tl.x + sideRatio * (tr.x - tl.x) + topRatio * (bl.x - tl.x),
-            tl.y + sideRatio * (tr.y - tl.y) + topRatio * (bl.y - tl.y)
-        );
-        
-        innerCorners[1] = new Point(
-            tr.x - sideRatio * (tr.x - tl.x) + topRatio * (br.x - tr.x),
-            tr.y - sideRatio * (tr.y - tl.y) + topRatio * (br.y - tr.y)
-        );
-        
-        innerCorners[2] = new Point(
-            br.x - sideRatio * (br.x - bl.x) - bottomRatio * (br.x - tr.x),
-            br.y - sideRatio * (br.y - bl.y) - bottomRatio * (br.y - tr.y)
-        );
-        
-        innerCorners[3] = new Point(
-            bl.x + sideRatio * (br.x - bl.x) - bottomRatio * (bl.x - tl.x),
-            bl.y + sideRatio * (br.y - bl.y) - bottomRatio * (bl.y - tl.y)
-        );
-        
-        return innerCorners;
+    /**
+     * Calculate inner board corners by shrinking the outer board.
+     * The border is 2cm on each side (44cm outer -> 40cm inner).
+     */
+    public static Point[] calculateInnerCorners(Point[] outerCorners) {
+    // outerCorners: [TL, TR, BR, BL]
+    Point tl = outerCorners[0];
+    Point tr = outerCorners[1];
+    Point br = outerCorners[2];
+    Point bl = outerCorners[3];
+
+    // Calculate the shrink ratio: inner/outer = 40/44
+    double shrinkRatio = INNER_BOARD_SIZE_CM / OUTER_BOARD_SIZE_CM;
+
+    // 1. Calculate the BASE offset ratio (approx 0.045)
+    double baseOffsetRatio = (1.0 - shrinkRatio) / 2.0;
+
+    // 2. APPLY YOUR ADJUSTMENTS HERE
+    // Top border is 10% thinner (0.9), Bottom border is 10% thicker (1.1)
+    double topRatio = baseOffsetRatio * 0.84;
+    double bottomRatio = baseOffsetRatio * 1.16;
+    double sideRatio = baseOffsetRatio; // Sides stay standard
+
+    Point[] innerCorners = new Point[4];
+
+    // Top-left inner
+    // Moves Right by sideRatio, Moves DOWN by topRatio
+    innerCorners[0] = new Point(
+        tl.x + sideRatio * (tr.x - tl.x) + topRatio * (bl.x - tl.x),
+        tl.y + sideRatio * (tr.y - tl.y) + topRatio * (bl.y - tl.y)
+    );
+
+    // Top-right inner
+    // Moves Left by sideRatio, Moves DOWN by topRatio
+    innerCorners[1] = new Point(
+        tr.x - sideRatio * (tr.x - tl.x) + topRatio * (br.x - tr.x),
+        tr.y - sideRatio * (tr.y - tl.y) + topRatio * (br.y - tr.y)
+    );
+
+    // Bottom-right inner
+    // Moves Left by sideRatio, Moves UP by bottomRatio
+    innerCorners[2] = new Point(
+        br.x - sideRatio * (br.x - bl.x) - bottomRatio * (br.x - tr.x),
+        br.y - sideRatio * (br.y - bl.y) - bottomRatio * (br.y - tr.y)
+    );
+
+    // Bottom-left inner
+    // Moves Right by sideRatio, Moves UP by bottomRatio
+    innerCorners[3] = new Point(
+        bl.x + sideRatio * (br.x - bl.x) - bottomRatio * (bl.x - tl.x),
+        bl.y + sideRatio * (br.y - bl.y) - bottomRatio * (bl.y - tl.y)
+    );
+
+    System.out.println("Calculated inner corners with adjusted offsets:");
+    System.out.println("Top: " + (topRatio*100) + "%, Bottom: " + (bottomRatio*100) + "%");
+    
+    return innerCorners;
+}
+
+    public static List<Point> calculateGridCenters(Point[] innerCorners) {
+        List<Point> centers = new ArrayList<>();
+
+        // Set up perspective transform to map inner board to virtual square
+        Point[] dstPoints = new Point[]{
+                new Point(0, 0),
+                new Point(VIRTUAL_RESOLUTION, 0),
+                new Point(VIRTUAL_RESOLUTION, VIRTUAL_RESOLUTION),
+                new Point(0, VIRTUAL_RESOLUTION)
+        };
+
+        Mat srcMat = new MatOfPoint2f(innerCorners);
+        Mat dstMat = new MatOfPoint2f(dstPoints);
+        Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
+        Mat invertedMatrix = new Mat();
+        Core.invert(perspectiveMatrix, invertedMatrix);
+
+        // Now the virtual space directly represents the 40cm x 40cm playable area
+        // Divide into 8x8 grid
+        double squareSize = VIRTUAL_RESOLUTION / 8.0;
+
+        List<Point> virtualPoints = new ArrayList<>();
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                double x = (col * squareSize) + (squareSize / 2.0);
+                double y = (row * squareSize) + (squareSize / 2.0);
+                virtualPoints.add(new Point(x, y));
+            }
+        }
+
+        // Transform back to original image coordinates
+        MatOfPoint2f virtualMat = new MatOfPoint2f();
+        virtualMat.fromList(virtualPoints);
+        MatOfPoint2f originalMat = new MatOfPoint2f();
+        Core.perspectiveTransform(virtualMat, originalMat, invertedMatrix);
+
+        return originalMat.toList();
     }
 
-    // ==================== Data Classes ====================
-    
-    /**
-     * Stores board data for comparison
-     */
-    private static class BoardData {
-        Mat warpedBoard;
-        Mat[] squares; // 64 squares indexed 0-63
-        Point[] outerCorners;
-        Point[] innerCorners;
-        
-        BoardData(Mat warpedBoard, Mat[] squares, Point[] outerCorners, Point[] innerCorners) {
-            this.warpedBoard = warpedBoard;
-            this.squares = squares;
-            this.outerCorners = outerCorners;
-            this.innerCorners = innerCorners;
+    public static void drawCorners(Mat img, Point[] corners, Scalar color, String label) {
+        for (int i = 0; i < corners.length; i++) {
+            Imgproc.line(img, corners[i], corners[(i + 1) % 4], color, 3);
+            Imgproc.circle(img, corners[i], 8, color, -1);
+            Imgproc.putText(img, label + i, 
+                           new Point(corners[i].x + 10, corners[i].y - 10), 
+                           Imgproc.FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
         }
+    }
+
+    /**
+     * Extracts individual square images from the chessboard.
+     * Uses OUTER corners to warp, then crops based on INNER grid to avoid losing pieces.
+     * Each square is cropped with extra vertical height to capture tall pieces.
+     * Adjusts for perspective: bottom rows get more offset, top rows get less.
+     * * @param src Original source image
+     * @param outerCorners The 4 corners of the outer board (44cm)
+     * @param innerCorners The 4 corners of the playable 8x8 board (40cm)
+     * @param outputDir Directory to save square images
+     */
+    public static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir , String baseFileName) {
+        int warpedWidth = VIRTUAL_RESOLUTION;
+        
+        // --- FIX START: Define a "Sky Buffer" ---
+        // We need extra space ABOVE the board in the warped image for tall pieces on the back rank.
+        // Let's add 50% of the board height as a buffer above.
+        int skyBuffer = (int)(warpedWidth * 0.5); 
+        int warpedHeight = warpedWidth + skyBuffer; // Total height of the new image
+        
+        // Set up perspective transform using OUTER corners
+        // Crucial Change: We shift the Y coordinates down by 'skyBuffer'
+        Point[] dstPoints = new Point[]{
+                new Point(0, skyBuffer),                  // TL maps to (0, skyBuffer)
+                new Point(warpedWidth, skyBuffer),        // TR
+                new Point(warpedWidth, warpedWidth + skyBuffer), // BR
+                new Point(0, warpedWidth + skyBuffer)     // BL
+        };
+        // --- FIX END ---
+
+        Mat srcMat = new MatOfPoint2f(outerCorners);
+        Mat dstMat = new MatOfPoint2f(dstPoints);
+        Mat perspectiveMatrix = Imgproc.getPerspectiveTransform(srcMat, dstMat);
+
+        // Warp the image with the new height
+        Mat warpedBoard = new Mat();
+        Imgproc.warpPerspective(src, warpedBoard, perspectiveMatrix, 
+                                new Size(warpedWidth, warpedHeight));
+
+        if (DEBUG_MODE) {
+            Imgcodecs.imwrite("debug_warped_board_with_buffer.jpg", warpedBoard);
+        }
+
+        // Calculate geometry
+        double outerSize = OUTER_BOARD_SIZE_CM;
+        double innerSize = INNER_BOARD_SIZE_CM;
+        double borderRatio = BORDER_WIDTH_CM / outerSize; 
+        
+        // Inner board pixel calculation
+        double innerStartPixel = warpedWidth * borderRatio;
+        double innerSizePixel = warpedWidth * (innerSize / outerSize);
+        double squareSize = innerSizePixel / 8.0;
+        
+        // Base extra padding for pieces
+        double baseExtraHeightRatio = 0.85;  
+        double extraWidthRatio = 0.3;       
+        int extraWidthPerSide = (int)(squareSize * extraWidthRatio / 2.0);
+
+        int squareNumber = 1;
+        
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                
+                // --- FIX: Adjust Base Y to account for the Sky Buffer ---
+                // The board doesn't start at Y=0 anymore; it starts at Y=skyBuffer
+                double baseX = innerStartPixel + (col * squareSize);
+                double baseY = skyBuffer + innerStartPixel + (row * squareSize); 
+                
+                // Logic for row adjustments (unchanged, but now safe to use)
+                double rowAdjustment;
+
+                if (row == 0) {
+                    // Rank 8: Can now safely grab huge chunks upwards
+                    rowAdjustment = baseExtraHeightRatio + 0.3; 
+                } else if (row < 2) {
+                    rowAdjustment = baseExtraHeightRatio + 0.2;
+                } else if(row < 4) {
+                    rowAdjustment = baseExtraHeightRatio;
+                }  else if(row < 6) {
+                    rowAdjustment = baseExtraHeightRatio - 0.2;
+                } else {
+                    rowAdjustment = baseExtraHeightRatio -0.3;
+                }
+                
+                int extraHeight = (int)(squareSize * rowAdjustment);
+
+                // Calculate Crop Coordinates
+                // Since we added skyBuffer, (baseY - extraHeight) will no longer be negative!
+                int extendedX = (int)Math.max(0, baseX - extraWidthPerSide);
+                int extendedY = (int)Math.max(0, baseY - extraHeight);
+                
+                int extendedWidth = (int)squareSize + (2 * extraWidthPerSide);
+                int extendedHeight = (int)squareSize + extraHeight;
+                
+                // Boundary Checks (Prevent crashing if we go off the bottom/right)
+                if (extendedX + extendedWidth > warpedBoard.width()) {
+                    extendedWidth = warpedBoard.width() - extendedX;
+                }
+                if (extendedY + extendedHeight > warpedBoard.height()) {
+                    extendedHeight = warpedBoard.height() - extendedY;
+                }
+
+                // Extract
+                Rect squareRect = new Rect(extendedX, extendedY, extendedWidth, extendedHeight);
+                Mat squareImg = new Mat(warpedBoard, squareRect);
+
+                // Save
+                String chessNotation = (char)('A' + col) + "" + (8 - row);
+                String filename = String.format(baseFileName + "square%02d_%s.jpg", squareNumber, chessNotation);
+                String filepath = Paths.get(outputDir, filename).toString();
+
+                Imgcodecs.imwrite(filepath, squareImg);
+                squareNumber++;
+            }
+        }
+        System.out.println("✓ Extracted with Sky Buffer. Check debug_warped_board_with_buffer.jpg to see the extra space.");
+    }
+
+    public static boolean hasReasonableAngles(Point[] ordered) {
+    // ordered: [TL, TR, BR, BL]
+    double[] angles = new double[4];
+    
+    for (int i = 0; i < 4; i++) {
+        Point prev = ordered[(i + 3) % 4];
+        Point curr = ordered[i];
+        Point next = ordered[(i + 1) % 4];
+        
+        // Calculate angle at curr using dot product
+        double v1x = prev.x - curr.x;
+        double v1y = prev.y - curr.y;
+        double v2x = next.x - curr.x;
+        double v2y = next.y - curr.y;
+        
+        double dot = v1x * v2x + v1y * v2y;
+        double mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+        double mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+        
+        double cosAngle = dot / (mag1 * mag2);
+        // Clamp to [-1, 1] to handle floating point errors
+        cosAngle = Math.max(-1.0, Math.min(1.0, cosAngle));
+        angles[i] = Math.toDegrees(Math.acos(cosAngle));
+    }
+    
+    System.out.println("Corner angles: " + Arrays.toString(angles));
+    
+    // All angles should be roughly between 45 and 135 degrees
+    // (accounting for perspective distortion)
+    for (double angle : angles) {
+        if (angle < 40 || angle > 140) {
+            System.out.println("Failed: Angle " + angle + " is too extreme");
+            return false;
+        }
+    }
+    
+    return true;
     }
 }

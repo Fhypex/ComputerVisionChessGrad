@@ -38,6 +38,13 @@ tasks.register('runDetectTest', JavaExec) {
     mainClass = 'com.chessgame.ChessMoveDetector'
 }
 
+tasks.register('detectBoard', JavaExec) {
+    group = 'application'
+    description = 'Runs the Change Detection test program'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.chessgame.BoardDetect2'
+}
+
 
 dependencies {
     implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'

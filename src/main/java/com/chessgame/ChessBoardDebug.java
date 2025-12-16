@@ -14,15 +14,15 @@ import java.util.List;
 public class ChessBoardDebug {
 
     // Physical board dimensions
-    private static final double OUTER_BOARD_SIZE_CM = 44.0;  // Total board size
-    private static final double INNER_BOARD_SIZE_CM = 40.0;  // Playable 8x8 area
-    private static final double BORDER_WIDTH_CM = (OUTER_BOARD_SIZE_CM - INNER_BOARD_SIZE_CM) / 2.0; // 2cm per side
+    public static final double OUTER_BOARD_SIZE_CM = 44.0;  // Total board size
+    public static final double INNER_BOARD_SIZE_CM = 40.0;  // Playable 8x8 area
+    public static final double BORDER_WIDTH_CM = (OUTER_BOARD_SIZE_CM - INNER_BOARD_SIZE_CM) / 2.0; // 2cm per side
     
     
-    private static final int VIRTUAL_RESOLUTION = 800;
+    public static final int VIRTUAL_RESOLUTION = 800;
     
     // Set to true to save intermediate images for debugging
-    private static final boolean DEBUG_MODE = true;
+    public static final boolean DEBUG_MODE = true;
 
     static { 
         OpenCV.loadLocally(); 
@@ -30,7 +30,7 @@ public class ChessBoardDebug {
 
     public static void main(String[] args) {
 
-        String nameOfFile = "IMG_9667_720p.jpg";
+        String nameOfFile = "IMG_9664_720p.jpg";
 
         String inputImagePath = Paths.get("src", "main", "resources", "tests", nameOfFile).toString();
 
@@ -107,7 +107,7 @@ public class ChessBoardDebug {
         extractSquareImages(Imgcodecs.imread(inputImagePath), outerCorners, innerCorners, squaresOutputDir , baseFileName);
     }
 
-    private static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
+    public static Point[] findBoardCorners(Mat originalSrc, Mat debugImg) {
     // Downscale for better detection
     double processingWidth = 600.0;
     double scale = 1.0;
@@ -340,8 +340,8 @@ public class ChessBoardDebug {
                         Imgproc.line(debugImg, orderedScaled[k], orderedScaled[(k + 1) % 4], color, 2);
                         Imgproc.circle(debugImg, orderedScaled[k], 8, color, -1);
                         Imgproc.putText(debugImg, "A" + attemptNumber + "C" + k, 
-                                       new Point(orderedScaled[k].x + 10, orderedScaled[k].y - 10),
-                                       Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
+                                        new Point(orderedScaled[k].x + 10, orderedScaled[k].y - 10),
+                                        Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
                     }
                     attemptNumber++;
                     
@@ -370,7 +370,7 @@ public class ChessBoardDebug {
 }
 
 // NEW: Helper class to store candidates with scores
-private static class CandidateQuad {
+public static class CandidateQuad {
     Point[] corners;
     double score;
     
@@ -381,8 +381,8 @@ private static class CandidateQuad {
 }
 
 // NEW: Calculate comprehensive candidate score
-private static double calculateCandidateScore(Point[] ordered, double area, double solidity, 
-                                               double centerDistX, double centerDistY, Mat src) {
+public static double calculateCandidateScore(Point[] ordered, double area, double solidity, 
+                                            double centerDistX, double centerDistY, Mat src) {
     double score = 0.0;
     
     // Area score (prefer medium-large boards)
@@ -416,7 +416,7 @@ private static double calculateCandidateScore(Point[] ordered, double area, doub
 }
 
 // NEW: Check for chess board pattern inside candidate region
-private static double checkChessBoardPattern(Mat src, Point[] corners) {
+public static double checkChessBoardPattern(Mat src, Point[] corners) {
     try {
         // Warp the candidate region to a square
         Point[] ordered = orderPoints(corners);
@@ -473,7 +473,7 @@ private static double checkChessBoardPattern(Mat src, Point[] corners) {
 }
 
 // NEW: Check color consistency (board should have relatively uniform color)
-private static double checkColorConsistency(Mat src, Point[] corners) {
+public static double checkColorConsistency(Mat src, Point[] corners) {
     try {
         // Sample points inside the quadrilateral
         Point[] ordered = orderPoints(corners);
@@ -536,7 +536,7 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
      * Very lenient check - mainly ensures it's roughly quadrilateral shaped
      * and filters out obvious non-board shapes.
      */
-    private static boolean isValidQuadrilateral(Point[] pts) {
+    public static boolean isValidQuadrilateral(Point[] pts) {
     Point[] ordered = orderPoints(pts);
     // ordered: [TL, TR, BR, BL]
     
@@ -589,12 +589,29 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
         System.out.println("Failed: Diagonals too unequal: " + diagRatio);
         return false;
     }
+
+    // --- NEW CHECK: Bottom Edge Slope ---
+    // The vector connecting Bottom-Left (bl) and Bottom-Right (br) should be roughly horizontal.
+    double bottomDy = Math.abs(br.y - bl.y);
+    double bottomDx = Math.abs(br.x - bl.x);
+    
+    if (bottomDx > 1.0) { // Avoid division by zero
+        double bottomSlope = bottomDy / bottomDx;
+        System.out.println("Bottom edge slope: " + bottomSlope);
+        
+        // Threshold 0.15 is approximately 8.5 degrees.
+        // This ensures the bottom edge is "close slope" (horizontal) with "small error place".
+        if (bottomSlope > 0.15) {
+            System.out.println("Failed: Bottom edge not horizontal enough (Slope: " + bottomSlope + " > 0.15)");
+            return false;
+        }
+    }
     
     System.out.println("✓ Validation passed - proper quadrilateral detected");
     return true;
 }
 
-    private static Point[] orderPoints(Point[] pts) {
+    public static Point[] orderPoints(Point[] pts) {
         Point[] result = new Point[4];
         List<Point> points = Arrays.asList(pts);
         
@@ -620,7 +637,7 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
      * Calculate inner board corners by shrinking the outer board.
      * The border is 2cm on each side (44cm outer -> 40cm inner).
      */
-    private static Point[] calculateInnerCorners(Point[] outerCorners) {
+    public static Point[] calculateInnerCorners(Point[] outerCorners) {
     // outerCorners: [TL, TR, BR, BL]
     Point tl = outerCorners[0];
     Point tr = outerCorners[1];
@@ -675,7 +692,7 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
     return innerCorners;
 }
 
-    private static List<Point> calculateGridCenters(Point[] innerCorners) {
+    public static List<Point> calculateGridCenters(Point[] innerCorners) {
         List<Point> centers = new ArrayList<>();
 
         // Set up perspective transform to map inner board to virtual square
@@ -714,7 +731,7 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
         return originalMat.toList();
     }
 
-    private static void drawCorners(Mat img, Point[] corners, Scalar color, String label) {
+    public static void drawCorners(Mat img, Point[] corners, Scalar color, String label) {
         for (int i = 0; i < corners.length; i++) {
             Imgproc.line(img, corners[i], corners[(i + 1) % 4], color, 3);
             Imgproc.circle(img, corners[i], 8, color, -1);
@@ -729,13 +746,12 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
      * Uses OUTER corners to warp, then crops based on INNER grid to avoid losing pieces.
      * Each square is cropped with extra vertical height to capture tall pieces.
      * Adjusts for perspective: bottom rows get more offset, top rows get less.
-     * 
-     * @param src Original source image
+     * * @param src Original source image
      * @param outerCorners The 4 corners of the outer board (44cm)
      * @param innerCorners The 4 corners of the playable 8x8 board (40cm)
      * @param outputDir Directory to save square images
      */
-    private static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir , String baseFileName) {
+    public static void extractSquareImages(Mat src, Point[] outerCorners, Point[] innerCorners, String outputDir , String baseFileName) {
         int warpedWidth = VIRTUAL_RESOLUTION;
         
         // --- FIX START: Define a "Sky Buffer" ---
@@ -842,7 +858,7 @@ private static double checkColorConsistency(Mat src, Point[] corners) {
         System.out.println("✓ Extracted with Sky Buffer. Check debug_warped_board_with_buffer.jpg to see the extra space.");
     }
 
-    private static boolean hasReasonableAngles(Point[] ordered) {
+    public static boolean hasReasonableAngles(Point[] ordered) {
     // ordered: [TL, TR, BR, BL]
     double[] angles = new double[4];
     
