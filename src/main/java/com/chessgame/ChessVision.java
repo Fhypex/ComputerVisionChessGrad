@@ -14,7 +14,7 @@ public class ChessVision {
             System.out.println("❌ Could not load image: " + imagePath);
             return;
         }
-        BoardDetector.detectAndSplitBoard(imagePath, "output_cells");
+        //BoardDetector.detectAndSplitBoard(imagePath, "output_cells");
 
         // Convert to grayscale and detect edges
         Mat gray = new Mat();
