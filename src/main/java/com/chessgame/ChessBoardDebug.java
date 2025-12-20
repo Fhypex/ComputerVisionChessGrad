@@ -30,9 +30,9 @@ public class ChessBoardDebug {
 
     public static void main(String[] args) {
 
-        String nameOfFile = "IMG_9664_720p.jpg";
+        String nameOfFile = "cobanstart.jpg";
 
-        String inputImagePath = Paths.get("src", "main", "resources", "tests", nameOfFile).toString();
+        String inputImagePath = Paths.get("src", "main", "resources", "tests","cobanmati", nameOfFile).toString();
 
         String outputImagePath = Paths.get("output", nameOfFile).toString();
 
@@ -603,6 +603,21 @@ public static double checkColorConsistency(Mat src, Point[] corners) {
         // This ensures the bottom edge is "close slope" (horizontal) with "small error place".
         if (bottomSlope > 0.15) {
             System.out.println("Failed: Bottom edge not horizontal enough (Slope: " + bottomSlope + " > 0.15)");
+            return false;
+        }
+    }
+
+    double topDy = Math.abs(tr.y - tl.y);
+    double topDx = Math.abs(tr.x - tl.x);
+    
+    if (bottomDx > 1.0) { // Avoid division by zero
+        double topSlope = topDy / topDx;
+        System.out.println("Bottom edge slope: " + topSlope);
+        
+        // Threshold 0.15 is approximately 8.5 degrees.
+        // This ensures the bottom edge is "close slope" (horizontal) with "small error place".
+        if (topSlope > 0.1) {
+            System.out.println("Failed: Bottom edge not horizontal enough (Slope: " + topSlope + " > 0.15)");
             return false;
         }
     }
