@@ -18,11 +18,15 @@ public class ChessGameTracker {
     private boolean blackRookA8Moved, blackRookH8Moved;
     private String lastEnPassantSquare;
     private List<String> moveHistory;
+    
+    // NEW: Game Over Flag
+    private boolean isGameOver;
 
     public ChessGameTracker() {
         this.board = new int[8][8];
         this.whiteToMove = true; // Game always starts with white
         this.moveHistory = new ArrayList<>();
+        this.isGameOver = false;
         initializeBoard();
         initializeCastlingRights();
     }
@@ -30,9 +34,7 @@ public class ChessGameTracker {
     private void initializeBoard() {
         // Initialize empty board
         for (int i = 0; i < 8; i++) {
-            for (int j = 0; j < 8; j++) {
-                board[i][j] = EMPTY;
-            }
+            Arrays.fill(board[i], EMPTY);
         }
 
         // White pieces (rank 0 and 1)
@@ -61,103 +63,68 @@ public class ChessGameTracker {
     }
 
     /**
-     * Process changed squares from BoardDetector and identify the move.
-     * This logic improves accuracy by cross-referencing visual changes with legal chess moves.
-     *
-     * @param changedSquares List of squares that changed (e.g., ["a2", "a4"])
-     * @return The move in algebraic notation, or null if move couldn't be identified
+     * ROBUST MOVE DETECTION:
+     * Validates moves against the board state to ignore noise (splashes).
      */
     public String processChangedSquares(List<String> changedSquares) {
+        if (isGameOver) {
+            System.out.println(">>> GAME IS OVER. No more moves accepted. <<<");
+            return null;
+        }
+
         if (changedSquares == null || changedSquares.isEmpty()) {
             return null;
         }
 
-        // Convert square names to coordinates
-        List<int[]> coords = new ArrayList<>();
-        for (String square : changedSquares) {
-            coords.add(squareToCoords(square));
+        List<int[]> allChanges = new ArrayList<>();
+        // FIX: Convert to lowercase to prevent IndexOutOfBoundsException
+        for (String s : changedSquares) {
+            allChanges.add(squareToCoords(s));
         }
 
-        // Identify the move type based on number of changed squares
-        String move = null;
-
-        if (coords.size() == 2) {
-            // Normal move or capture (Source square becomes empty, Dest square changes)
-            move = identifyNormalMove(coords);
-        } else if (coords.size() == 3) {
-            // En passant (Start, End, and Captured Pawn square all change)
-            move = identifyEnPassant(coords);
-        } else if (coords.size() == 4) {
-            // Castling (King Start/End, Rook Start/End)
-            move = identifyCastling(coords);
-        }
-
-        if (move != null) {
-            moveHistory.add(move);
-            whiteToMove = !whiteToMove;
-            // Reset en passant target unless specifically set by a double pawn push inside identifyNormalMove
-            if (!move.endsWith(" (EP)")) { 
-                // Note: Logic inside identifyNormalMove handles setting the specific target,
-                // here we essentially clear it if a non-pawn move happened, 
-                // but for simplicity we rely on the tracker state.
-                // A robust engine would reset 'lastEnPassantSquare' to "-" every turn 
-                // unless a double push just happened.
+        // 1. Identify potential Actors (Squares with current player's pieces)
+        List<int[]> candidatesFrom = new ArrayList<>();
+        for (int[] c : allChanges) {
+            int p = board[c[0]][c[1]];
+            if (p != EMPTY && isCorrectColor(p)) {
+                candidatesFrom.add(c);
             }
         }
 
-        return move;
+        // 2. CHECK CASTLING (Priority)
+        String castlingMove = findCastlingMove(allChanges);
+        if (castlingMove != null) return castlingMove;
+
+        // 3. CHECK NORMAL MOVES
+        // Try every combination of From -> To within the changed list
+        for (int[] from : candidatesFrom) {
+            for (int[] to : allChanges) {
+                if (Arrays.equals(from, to)) continue;
+
+                int piece = board[from[0]][from[1]];
+                if (isLegalMove(piece, from, to)) {
+                    // Valid move found. Ignore any other "splash" squares.
+                    return executeMove(from, to, piece);
+                }
+            }
+        }
+
+        // 4. CHECK EN PASSANT
+        String epMove = findEnPassantMove(candidatesFrom, allChanges);
+        if (epMove != null) return epMove;
+
+        return null;
     }
 
-    private String identifyNormalMove(List<int[]> coords) {
-        int[] from = null, to = null;
-
-        // Determine which square is 'from' and which is 'to'
-        // The 'from' square MUST contain a piece of the current player's color BEFORE the move.
-        // The 'to' square is the other one.
-        for (int[] coord : coords) {
-            int piece = board[coord[0]][coord[1]];
-            if (piece != EMPTY && isCorrectColor(piece)) {
-                from = coord;
-            }
-        }
-
-        // Fallback: If logic is ambiguous, try swapping
-        if (from == null) {
-            // Try assuming first is from
-            int p1 = board[coords.get(0)[0]][coords.get(0)[1]];
-             if (p1 != EMPTY && isCorrectColor(p1)) {
-                 from = coords.get(0);
-                 to = coords.get(1);
-             } else {
-                 from = coords.get(1);
-                 to = coords.get(0);
-             }
-        } else {
-            // Found 'from', so 'to' is the other one
-            to = (coords.get(0)[0] == from[0] && coords.get(0)[1] == from[1]) ? coords.get(1) : coords.get(0);
-        }
-
-        int piece = board[from[0]][from[1]];
-
-        // Basic validation
-        if (piece == EMPTY || !isCorrectColor(piece)) {
-            System.err.println("Invalid Move: No piece at source or wrong color.");
-            return null;
-        }
-
-        // Check if it's a legal move for this piece type
-        if (!isLegalMove(piece, from, to)) {
-            System.err.println("Invalid Move: Illegal move for piece " + pieceToChar(piece));
-            return null;
-        }
-
-        // Check for pawn promotion (Pawn reaches last rank)
+    private String executeMove(int[] from, int[] to, int piece) {
         String promotion = "";
+        
+        // Auto-promote to Queen for simplicity
         if (Math.abs(piece) == 1 && (to[0] == 0 || to[0] == 7)) {
-            promotion = "Q"; // Default to Queen for auto-tracking
+            promotion = "Q";
         }
 
-        // Check for double pawn push (Set En Passant target)
+        // Handle En Passant Target
         if (Math.abs(piece) == 1 && Math.abs(from[0] - to[0]) == 2) {
             int epRank = whiteToMove ? 2 : 5;
             lastEnPassantSquare = coordsToSquare(new int[]{epRank, from[1]});
@@ -165,173 +132,284 @@ public class ChessGameTracker {
             lastEnPassantSquare = "-";
         }
 
-        // Execute the move on internal board
-        board[to[0]][to[1]] = promotion.isEmpty() ? piece : (whiteToMove ? W_QUEEN : B_QUEEN);
+        int targetPiece = promotion.isEmpty() ? piece : (whiteToMove ? W_QUEEN : B_QUEEN);
+        board[to[0]][to[1]] = targetPiece;
         board[from[0]][from[1]] = EMPTY;
 
         updateCastlingRights(piece, from);
+        
+        // --- TURN FLIP ---
+        whiteToMove = !whiteToMove;
+        
+        // --- NEW: CHECKMATE DETECTION ---
+        // Check if the player who just received the turn (whiteToMove) is in Checkmate
+        if (isCheckmate(whiteToMove)) {
+            isGameOver = true;
+            String winner = whiteToMove ? "BLACK" : "WHITE"; // If White is mated, Black won
+            System.out.println("\n#############################################");
+            System.out.println("### CHECKMATE! " + winner + " won the game. ###");
+            System.out.println("#############################################\n");
+            
+            String m = coordsToSquare(from) + coordsToSquare(to) + promotion + "#";
+            moveHistory.add(m);
+            return m;
+        }
 
-        String fromSquare = coordsToSquare(from);
-        String toSquare = coordsToSquare(to);
-
-        return fromSquare + toSquare + promotion;
+        String m = coordsToSquare(from) + coordsToSquare(to) + promotion;
+        moveHistory.add(m);
+        return m;
     }
 
-    private String identifyEnPassant(List<int[]> coords) {
-        // En Passant involves 3 squares changing: 
-        // 1. Pawn Start
-        // 2. Pawn End
-        // 3. Captured Pawn (which becomes empty)
-        
-        int[] pawnFrom = null, pawnTo = null, capturedPawn = null;
+    /**
+     * NEW: Check if the specified color is in Checkmate.
+     * Checkmate = King is in Check AND has NO legal moves to escape.
+     */
+    private boolean isCheckmate(boolean colorToCheck) {
+        // 1. Is King in Check?
+        if (!isKingInCheck(colorToCheck)) {
+            return false;
+        }
 
-        // Find the friendly pawn
-        for (int[] coord : coords) {
-            int piece = board[coord[0]][coord[1]];
-            if (Math.abs(piece) == 1 && isCorrectColor(piece)) {
-                pawnFrom = coord;
+        // 2. Can any piece move to remove the check?
+        // Brute force: Try ALL legal moves for this color. 
+        // If any move results in King NOT being in check, it's not mate.
+        
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                int p = board[r][c];
+                // If piece belongs to the player in check
+                if (p != EMPTY && (colorToCheck ? p > 0 : p < 0)) {
+                    int[] from = {r, c};
+                    
+                    // Try moving to every square on the board
+                    for (int tr = 0; tr < 8; tr++) {
+                        for (int tc = 0; tc < 8; tc++) {
+                            int[] to = {tr, tc};
+                            
+                            // Check basic geometry legality (ignoring check for a moment)
+                            if (canPieceMoveGeometry(p, from, to, board[tr][tc])) {
+                                
+                                // SIMULATE MOVE
+                                int[][] backupBoard = copyBoard(board);
+                                board[tr][tc] = p; // simplified (no promotion logic needed for escape check usually)
+                                board[r][c] = EMPTY;
+                                
+                                // Did this fix the check?
+                                boolean stillInCheck = isKingInCheck(colorToCheck);
+                                
+                                // RESTORE BOARD
+                                restoreBoard(backupBoard);
+                                
+                                if (!stillInCheck) {
+                                    // Found an escape!
+                                    return false; 
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        
+        // No escape found
+        return true;
+    }
 
-        if (pawnFrom == null) return null;
+    /**
+     * NEW: Checks if the King of the given color is currently under attack.
+     */
+    private boolean isKingInCheck(boolean whiteKing) {
+        int[] kingPos = null;
+        int kingVal = whiteKing ? W_KING : B_KING;
 
-        // Find destination and captured square
-        for (int[] coord : coords) {
-            if (coord[0] == pawnFrom[0] && coord[1] == pawnFrom[1]) continue;
-            
-            // Logic: Destination is empty or was empty. Captured square had enemy pawn.
-            // This is tricky visually because AFTER the move, both Start and Captured are empty,
-            // and End has the pawn.
-            // So we look for the square that ends up with the pawn (which is diagonal).
-            
-            // Simplified: The destination must be diagonal
-            if (Math.abs(coord[1] - pawnFrom[1]) == 1 && Math.abs(coord[0] - pawnFrom[0]) == 1) {
-                // This is likely the destination
-                pawnTo = coord;
-            } else {
-                capturedPawn = coord;
+        // Find King
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                if (board[r][c] == kingVal) {
+                    kingPos = new int[]{r, c};
+                    break;
+                }
             }
         }
-
-        if (pawnFrom == null || pawnTo == null) return null;
-
-        // Execute
-        int pawn = board[pawnFrom[0]][pawnFrom[1]];
-        board[pawnTo[0]][pawnTo[1]] = pawn;
-        board[pawnFrom[0]][pawnFrom[1]] = EMPTY;
-        if (capturedPawn != null) {
-            board[capturedPawn[0]][capturedPawn[1]] = EMPTY;
-        }
         
-        lastEnPassantSquare = "-";
-        return coordsToSquare(pawnFrom) + coordsToSquare(pawnTo) + " (EP)";
+        if (kingPos == null) return false; // Should not happen
+
+        // Check if any enemy piece attacks the King's square
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                int p = board[r][c];
+                // If it's an enemy piece
+                if (p != EMPTY && (whiteKing ? p < 0 : p > 0)) {
+                    // Can this enemy piece attack the king?
+                    if (canPieceAttack(p, new int[]{r, c}, kingPos)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
-    private String identifyCastling(List<int[]> coords) {
-        // Sort coordinates by file (a=0 to h=7)
-        coords.sort(Comparator.comparingInt(a -> a[1]));
+    /**
+     * NEW: simplified move checker for attacks.
+     * Unlike isLegalMove, this doesn't check whose turn it is, just geometry.
+     */
+    private boolean canPieceAttack(int piece, int[] from, int[] to) {
+        int absPiece = Math.abs(piece);
+        int rankDiff = to[0] - from[0];
+        int fileDiff = to[1] - from[1];
+        boolean isWhite = piece > 0;
 
-        // There should be 4 changes. 
-        // Queenside: a(RookStart), c(KingEnd), d(RookEnd), e(KingStart) -> Indices 0, 2, 3, 4
-        // Kingside: e(KingStart), f(RookEnd), g(KingEnd), h(RookStart) -> Indices 4, 5, 6, 7 (relative to board)
-        
-        int rank = coords.get(0)[0];
-        boolean isWhite = rank == 0;
-
-        if (isWhite != whiteToMove) return null;
-
-        // Check if the last changed square is on the H file (file 7) -> Kingside
-        boolean isKingside = coords.get(3)[1] == 7;
-
-        if (isKingside) {
-            // Execute Kingside
-            board[rank][6] = isWhite ? W_KING : B_KING; // g
-            board[rank][5] = isWhite ? W_ROOK : B_ROOK; // f
-            board[rank][4] = EMPTY; // e
-            board[rank][7] = EMPTY; // h
-
-            if (isWhite) { whiteKingMoved = true; whiteRookH1Moved = true; } 
-            else { blackKingMoved = true; blackRookH8Moved = true; }
-
-            lastEnPassantSquare = "-";
-            return isWhite ? "e1g1 (0-0)" : "e8g8 (0-0)";
-        } else {
-            // Execute Queenside
-            board[rank][2] = isWhite ? W_KING : B_KING; // c
-            board[rank][3] = isWhite ? W_ROOK : B_ROOK; // d
-            board[rank][4] = EMPTY; // e
-            board[rank][0] = EMPTY; // a
-
-            if (isWhite) { whiteKingMoved = true; whiteRookA1Moved = true; } 
-            else { blackKingMoved = true; blackRookA8Moved = true; }
-
-            lastEnPassantSquare = "-";
-            return isWhite ? "e1c1 (0-0-0)" : "e8c8 (0-0-0)";
+        if (absPiece == 1) { // Pawn (Special case for attacking)
+            int dir = isWhite ? 1 : -1;
+            // Pawn only attacks diagonals
+            return rankDiff == dir && Math.abs(fileDiff) == 1;
         }
+
+        // For all other pieces, attack logic is same as move logic (assuming target is enemy/king)
+        return canPieceMoveGeometry(piece, from, to, isWhite ? B_PAWN : W_PAWN); // Dummy target to simulate capture
     }
 
-    private boolean isLegalMove(int piece, int[] from, int[] to) {
+    /**
+     * NEW: Refactored geometry logic.
+     * Separated from isLegalMove so we can use it for checkmate simulation.
+     */
+    private boolean canPieceMoveGeometry(int piece, int[] from, int[] to, int targetPiece) {
         int fromRank = from[0], fromFile = from[1];
         int toRank = to[0], toFile = to[1];
         int rankDiff = toRank - fromRank;
         int fileDiff = toFile - fromFile;
-
         int absPiece = Math.abs(piece);
         boolean isWhite = piece > 0;
 
+        // Standard rule: Cannot land on own piece
+        if (targetPiece != EMPTY && (targetPiece > 0) == isWhite) return false;
+
         switch (absPiece) {
             case 1: // Pawn
-                int direction = isWhite ? 1 : -1;
-                // Push
-                if (fileDiff == 0 && rankDiff == direction && board[toRank][toFile] == EMPTY) return true;
-                // Double Push
-                int startRank = isWhite ? 1 : 6;
-                if (fileDiff == 0 && fromRank == startRank && rankDiff == 2 * direction &&
-                    board[toRank][toFile] == EMPTY && board[fromRank + direction][fromFile] == EMPTY) return true;
+                int dir = isWhite ? 1 : -1;
+                // Push 1
+                if (fileDiff == 0 && rankDiff == dir && targetPiece == EMPTY) return true;
+                // Push 2
+                if (fileDiff == 0 && fromRank == (isWhite?1:6) && rankDiff == 2*dir && targetPiece == EMPTY && board[fromRank+dir][fromFile] == EMPTY) return true;
                 // Capture
-                if (Math.abs(fileDiff) == 1 && rankDiff == direction) {
-                    int target = board[toRank][toFile];
-                    return target != EMPTY && (target > 0) != isWhite;
-                }
+                if (Math.abs(fileDiff) == 1 && rankDiff == dir && targetPiece != EMPTY) return true;
                 return false;
-
             case 2: // Knight
-                return (Math.abs(rankDiff) == 2 && Math.abs(fileDiff) == 1) ||
-                       (Math.abs(rankDiff) == 1 && Math.abs(fileDiff) == 2);
-
+                return (Math.abs(rankDiff)==2 && Math.abs(fileDiff)==1) || (Math.abs(rankDiff)==1 && Math.abs(fileDiff)==2);
             case 3: // Bishop
                 return Math.abs(rankDiff) == Math.abs(fileDiff) && isPathClear(from, to);
-
             case 4: // Rook
                 return (rankDiff == 0 || fileDiff == 0) && isPathClear(from, to);
-
             case 5: // Queen
-                return (rankDiff == 0 || fileDiff == 0 || Math.abs(rankDiff) == Math.abs(fileDiff)) && isPathClear(from, to);
-
+                return (rankDiff==0 || fileDiff==0 || Math.abs(rankDiff)==Math.abs(fileDiff)) && isPathClear(from, to);
             case 6: // King
                 return Math.abs(rankDiff) <= 1 && Math.abs(fileDiff) <= 1;
         }
         return false;
     }
+    
+    // Helper to copy board for simulation
+    private int[][] copyBoard(int[][] source) {
+        int[][] newBoard = new int[8][8];
+        for(int i=0; i<8; i++) System.arraycopy(source[i], 0, newBoard[i], 0, 8);
+        return newBoard;
+    }
+    
+    // Helper to restore board
+    private void restoreBoard(int[][] source) {
+        for(int i=0; i<8; i++) System.arraycopy(source[i], 0, board[i], 0, 8);
+    }
+
+    private String findCastlingMove(List<int[]> changes) {
+        int rank = whiteToMove ? 0 : 7;
+        int kingPiece = whiteToMove ? W_KING : B_KING;
+        
+        // Verify King is on start square
+        if (board[rank][4] != kingPiece) return null;
+
+        // King start must be in changed squares
+        if (!containsSquare(changes, rank, 4)) return null;
+
+        // Check Kingside (Target g-file: index 6)
+        if (containsSquare(changes, rank, 6)) {
+             if ((whiteToMove && !whiteKingMoved && !whiteRookH1Moved) || (!whiteToMove && !blackKingMoved && !blackRookH8Moved)) {
+                 if (board[rank][5] == EMPTY && board[rank][6] == EMPTY) {
+                     board[rank][6] = kingPiece; board[rank][5] = whiteToMove ? W_ROOK : B_ROOK;
+                     board[rank][4] = EMPTY; board[rank][7] = EMPTY;
+                     if (whiteToMove) { whiteKingMoved = true; } else { blackKingMoved = true; }
+                     whiteToMove = !whiteToMove;
+                     lastEnPassantSquare = "-";
+                     return whiteToMove ? "e8g8 (0-0)" : "e1g1 (0-0)"; 
+                 }
+             }
+        }
+
+        // Check Queenside (Target c-file: index 2)
+        if (containsSquare(changes, rank, 2)) {
+             if ((whiteToMove && !whiteKingMoved && !whiteRookA1Moved) || (!whiteToMove && !blackKingMoved && !blackRookA8Moved)) {
+                 if (board[rank][1] == EMPTY && board[rank][2] == EMPTY && board[rank][3] == EMPTY) {
+                     board[rank][2] = kingPiece; board[rank][3] = whiteToMove ? W_ROOK : B_ROOK;
+                     board[rank][4] = EMPTY; board[rank][0] = EMPTY;
+                     if (whiteToMove) { whiteKingMoved = true; } else { blackKingMoved = true; }
+                     whiteToMove = !whiteToMove;
+                     lastEnPassantSquare = "-";
+                     return whiteToMove ? "e8c8 (0-0-0)" : "e1c1 (0-0-0)";
+                 }
+             }
+        }
+        return null;
+    }
+
+    private String findEnPassantMove(List<int[]> candidatesFrom, List<int[]> changes) {
+        if (lastEnPassantSquare.equals("-")) return null;
+        int[] epCoords = squareToCoords(lastEnPassantSquare);
+
+        for (int[] from : candidatesFrom) {
+            int piece = board[from[0]][from[1]];
+            if (Math.abs(piece) != 1) continue;
+
+            // Geometry check
+            if (Math.abs(epCoords[1] - from[1]) == 1 && Math.abs(epCoords[0] - from[0]) == 1) {
+                if (containsSquare(changes, epCoords[0], epCoords[1])) {
+                    int capRank = whiteToMove ? 4 : 3;
+                    board[epCoords[0]][epCoords[1]] = piece;
+                    board[from[0]][from[1]] = EMPTY;
+                    board[capRank][epCoords[1]] = EMPTY; 
+                    whiteToMove = !whiteToMove;
+                    lastEnPassantSquare = "-";
+                    return coordsToSquare(from) + coordsToSquare(epCoords) + " (EP)";
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isLegalMove(int piece, int[] from, int[] to) {
+        // Wrapper for canPieceMoveGeometry that enforces turn color
+        boolean isWhite = piece > 0;
+        if (whiteToMove != isWhite) return false;
+        
+        return canPieceMoveGeometry(piece, from, to, board[to[0]][to[1]]);
+    }
 
     private boolean isPathClear(int[] from, int[] to) {
-        int rankStep = Integer.compare(to[0] - from[0], 0);
-        int fileStep = Integer.compare(to[1] - from[1], 0);
-
-        int rank = from[0] + rankStep;
-        int file = from[1] + fileStep;
-
-        while (rank != to[0] || file != to[1]) {
-            if (board[rank][file] != EMPTY) return false;
-            rank += rankStep;
-            file += fileStep;
+        int rStep = Integer.compare(to[0] - from[0], 0);
+        int cStep = Integer.compare(to[1] - from[1], 0);
+        int r = from[0] + rStep, c = from[1] + cStep;
+        while (r != to[0] || c != to[1]) {
+            if (board[r][c] != EMPTY) return false;
+            r += rStep; c += cStep;
         }
         return true;
     }
 
-    private boolean isCorrectColor(int piece) {
-        return whiteToMove ? piece > 0 : piece < 0;
+    private boolean containsSquare(List<int[]> list, int r, int c) {
+        for (int[] coord : list) if (coord[0] == r && coord[1] == c) return true;
+        return false;
     }
+
+    private boolean isCorrectColor(int p) { return whiteToMove ? p > 0 : p < 0; }
 
     private void updateCastlingRights(int piece, int[] from) {
         if (piece == W_KING) whiteKingMoved = true;
@@ -392,7 +470,7 @@ public class ChessGameTracker {
         return piece > 0 ? Character.toUpperCase(c) : c;
     }
 
-    // --- FIX IS HERE: Handles both Uppercase and Lowercase ---
+    // Handles Uppercase (F4) and Lowercase (f4) to prevent crashes
     private int[] squareToCoords(String square) {
         String lower = square.toLowerCase();
         int file = lower.charAt(0) - 'a';

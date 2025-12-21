@@ -5,6 +5,7 @@ import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.imgcodecs.Imgcodecs;
+import javafx.application.Platform;
 
 import java.nio.file.Paths;
 import java.util.List;
@@ -12,8 +13,8 @@ import java.util.List;
 public class ChessMoveDetectorTest {
 
     // --- CONFIGURATION ---
-    public static final String GAME_NAME = "coban"; // e.g., "coban"
-    public static final String TEST_DIR = "cobanmati"; // Subfolder in resources/tests/
+    public static final String GAME_NAME = "dr"; 
+    public static final String TEST_DIR = "dr"; 
     public static final String FILE_EXT = ".jpg";
     // ---------------------
 
@@ -22,12 +23,16 @@ public class ChessMoveDetectorTest {
     }
 
     public static void main(String[] args) {
+        // 1. Initialize JavaFX Environment
+        try {
+            Platform.startup(() -> {});
+        } catch (IllegalStateException e) {
+            // Platform already started
+        }
+
         ChessGameTracker tracker = new ChessGameTracker();
 
-        // 1. Load Start Image
-        String startFileName = GAME_NAME + "start" + FILE_EXT; // e.g., cobanstart.jpg
-        
-        // Fallback: Check if start exists, if not try hamle1 as base
+        String startFileName = GAME_NAME + "start" + FILE_EXT; 
         if (!isFileExists(startFileName)) {
             startFileName = GAME_NAME + "hamle1" + FILE_EXT; 
             System.out.println("Info: 'start' image not found, attempting to use " + startFileName + " as base.");
@@ -38,8 +43,23 @@ public class ChessMoveDetectorTest {
 
         if (prevImage.empty()) {
             System.err.println("CRITICAL ERROR: Could not load starting image: " + startPath);
+            Platform.exit();
             return;
         }
+
+        // --- OPTIONAL: Verify Board on Start Image ---
+        System.out.println("Verifying Start Image Board...");
+        Point[] startCorners = BoardDetector.findBoardCorners(prevImage, prevImage.clone());
+        if (startCorners == null) {
+            System.out.println("Could not auto-detect board on START image. Opening Manual Picker...");
+            startCorners = BoardDetector.pickCornersManually(prevImage, null);
+            if (startCorners == null) {
+                System.out.println("Terminated by user.");
+                Platform.exit();
+                return;
+            }
+        }
+        // ---------------------------------------------
 
         System.out.println("=== CHESS GAME TRACKING STARTED (AUTOMATED) ===");
         System.out.println("Game: " + GAME_NAME);
@@ -51,18 +71,6 @@ public class ChessMoveDetectorTest {
         
         // Loop indefinitely until error or end of files
         while (true) {
-            // Logic: Start image is state 0. "hamle2" is the result of Move 1? 
-            // Naming convention usually: start -> hamle1 (Move 1) -> hamle2 (Move 2)
-            // Adjust index based on your specific filenames. 
-            // Assuming: start vs hamle2 is comparing Move 1? 
-            // Or start vs hamle1 is Move 1?
-            // Usually: 
-            // Compare "start" vs "hamle1" -> Detects Move 1
-            // Compare "hamle1" vs "hamle2" -> Detects Move 2
-            
-            // If we started with 'start', next is 'hamle1' for Move 1.
-            // If we started with 'hamle1', next is 'hamle2' for Move 1 (relative to file load).
-            
             String nextFileName;
             if (startFileName.contains("start")) {
                  nextFileName = GAME_NAME + "hamle" + moveCount + FILE_EXT;
@@ -76,56 +84,85 @@ public class ChessMoveDetectorTest {
             String nextPath = getPath(nextFileName);
             Mat currImage = Imgcodecs.imread(nextPath);
 
-            // 1. Check if file exists
             if (currImage.empty()) {
                 System.out.println("Result: End of files reached (or file missing).");
-                System.out.println("Tracking stopped successfully.");
                 break;
             }
 
-            // 2. Detect Board (Source of Truth)
-            Mat debugImg = currImage.clone();
-            Point[] outerCorners = BoardDetector.findBoardCorners(currImage, debugImg);
+            // --- RETRY LOOP FOR CURRENT MOVE ---
+            // If detection fails OR move logic fails, we open GUI and try again with new corners
+            boolean moveResolved = false;
+            Point[] outerCorners = null;
             
-            if (outerCorners == null) {
-                System.err.println("FAILURE: Could not detect board in " + nextFileName);
-                System.err.println("Stopping execution.");
-                break;
-            }
+            // Initial attempt
+            outerCorners = BoardDetector.findBoardCorners(currImage, currImage.clone());
+            
+            while (!moveResolved) {
+                // If auto-detection failed, force manual pick
+                if (outerCorners == null) {
+                    System.err.println(">> Auto-detection failed. Opening Manual Interface...");
+                    outerCorners = BoardDetector.pickCornersManually(currImage, outerCorners);
+                    
+                    if (outerCorners == null) {
+                        System.out.println(">> TERMINATE signal received.");
+                        Platform.exit();
+                        return;
+                    }
+                }
 
-            // 3. Warp Images
-            Mat warpedPrev = ChessMoveLogic.warpBoardStandardized(prevImage, outerCorners);
-            Mat warpedCurr = ChessMoveLogic.warpBoardStandardized(currImage, outerCorners);
+                // 3. Warp Images using corners (user verified or auto-detected)
+                // Note: Logic implies we use CURRENT corners for warping both? 
+                // Or standardized corners. Assuming standard warp:
+                Mat warpedPrev = ChessMoveLogic.warpBoardStandardized(prevImage, outerCorners);
+                Mat warpedCurr = ChessMoveLogic.warpBoardStandardized(currImage, outerCorners);
 
-            // 4. Detect Visual Changes
-            List<String> changedSquares = ChessMoveLogic.detectSquareChanges(warpedPrev, warpedCurr);
-            System.out.println("Visual Changes: " + changedSquares);
+                // 4. Detect Visual Changes
+                List<String> changedSquares = ChessMoveLogic.detectSquareChanges(warpedPrev, warpedCurr);
+                System.out.println("Visual Changes: " + changedSquares);
 
-            // 5. Identify and Validate Move
-            String move = tracker.processChangedSquares(changedSquares);
+                // 5. Identify and Validate Move
+                String move = tracker.processChangedSquares(changedSquares);
 
-            if (move != null) {
-                System.out.println(">>> CONFIRMED MOVE: " + move + " <<<");
-                tracker.printBoard();
-                System.out.println("FEN: " + tracker.getFEN());
-                
-                // Save debug image
-                String debugOut = "output/" + GAME_NAME + "_move" + moveCount + "_detected.jpg";
-                BoardDetector.drawCorners(currImage, outerCorners, new Scalar(0, 255, 0), "Board");
-                Imgcodecs.imwrite(debugOut, currImage);
-                
-                // Prepare for next iteration
-                prevImage = currImage; 
-                moveCount++;
-            } else {
-                System.err.println("FAILURE: Logic could not identify a valid chess move.");
-                System.err.println("Squares changed: " + changedSquares);
-                System.err.println("Stopping execution due to tracking loss.");
-                break;
+                if (move != null) {
+                    System.out.println(">>> CONFIRMED MOVE: " + move + " <<<");
+                    tracker.printBoard();
+                    System.out.println("FEN: " + tracker.getFEN());
+                    
+                    // Save debug image
+                    String debugOut = "output/" + GAME_NAME + "_move" + moveCount + "_detected.jpg";
+                    BoardDetector.drawCorners(currImage, outerCorners, new Scalar(0, 255, 0), "Board");
+                    Imgcodecs.imwrite(debugOut, currImage);
+                    
+                    if (move.endsWith("#")) {
+                        System.out.println(">>> CHECKMATE DETECTED. Stopping tracking. <<<");
+                        Platform.exit();
+                        return;
+                    }
+
+                    // Prepare for next iteration
+                    prevImage = currImage; 
+                    moveCount++;
+                    moveResolved = true; // Exit retry loop
+                } else {
+                    System.err.println("FAILURE: Logic could not identify a valid chess move.");
+                    System.err.println("Squares changed: " + changedSquares);
+                    System.err.println(">> Opening Manual Interface to adjust corners and retry...");
+                    
+                    // Open GUI with current corners so user can adjust
+                    outerCorners = BoardDetector.pickCornersManually(currImage, outerCorners);
+                    
+                    if (outerCorners == null) {
+                         System.out.println(">> TERMINATE signal received.");
+                         Platform.exit();
+                         return;
+                    }
+                    // Loop continues...
+                }
             }
         }
         
         System.out.println("=== GAME TRACKING ENDED ===");
+        Platform.exit();
     }
 
     private static String getPath(String filename) {

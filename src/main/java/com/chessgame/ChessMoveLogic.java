@@ -111,7 +111,7 @@ public class ChessMoveLogic {
                 // A shadow will cause high Intensity Score (~30-50) but very low Edge Score (~0-1).
                 // A moved piece will cause high Intensity Score AND high Edge Score.
 
-                double INTENSITY_THRESH = 25.0; // Was 15.0
+                double INTENSITY_THRESH = 15.0; // Was 15.0
                 double EDGE_THRESH = 3.0;       // Requires ~3% of pixels to be different edges
 
                 boolean isChanged = false;
