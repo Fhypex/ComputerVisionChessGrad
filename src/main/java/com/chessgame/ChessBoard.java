@@ -1,122 +1,194 @@
 package com.chessgame;
 
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Label;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
+
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ChessBoard {
 
-    private final int SIZE = 8;
-    private GridPane boardUI;
-    private String[][] boardState = new String[SIZE][SIZE]; // boardState[row][col], row 0 = rank 8
+    private final GridPane grid;
+    private final Map<Integer, Image> pieceImages;
+    private boolean isWhitePerspective = true; // Default: White at bottom
+
+    // Colors for the board squares
+    private final Color lightSquareColor = Color.web("#F0D9B5");
+    private final Color darkSquareColor = Color.web("#B58863");
 
     public ChessBoard() {
-        boardUI = new GridPane();
-        initStartingPosition(); // fill boardState with starting pieces
-        createBoardUI();
+        this.grid = new GridPane();
+        this.grid.setAlignment(Pos.CENTER);
+        this.pieceImages = new HashMap<>();
+        
+        loadResources();
+        initializeBoard();
     }
 
-    /**
-     * Initialize the boardState with the standard chess starting position.
-     * row 0 = Black's back rank (r n b q k b n r)
-     * row 1 = Black pawns (p)
-     * row 6 = White pawns (P)
-     * row 7 = White's back rank (R N B Q K B N R)
-     */
-    private void initStartingPosition() {
-        // Black back rank (row 0)
-        boardState[0] = new String[] { "r", "n", "b", "q", "k", "b", "n", "r" };
-        // Black pawns (row 1)
-        boardState[1] = new String[] { "p", "p", "p", "p", "p", "p", "p", "p" };
-        // Empty ranks (rows 2..5)
-        for (int r = 2; r <= 5; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                boardState[r][c] = "";
-            }
-        }
-        // White pawns (row 6)
-        boardState[6] = new String[] { "P", "P", "P", "P", "P", "P", "P", "P" };
-        // White back rank (row 7)
-        boardState[7] = new String[] { "R", "N", "B", "Q", "K", "B", "N", "R" };
+    public Node getBoardUI() {
+        return grid;
     }
 
-    /** Builds the GridPane UI based on current boardState. */
-    private void createBoardUI() {
-        boardUI.getChildren().clear();
-        for (int row = 0; row < SIZE; row++) {
-            for (int col = 0; col < SIZE; col++) {
-                Color color = (row + col) % 2 == 0 ? Color.BEIGE : Color.SADDLEBROWN;
-                Square square = new Square(row, col, color);
+    public void setPerspective(boolean whiteAtBottom) {
+        this.isWhitePerspective = whiteAtBottom;
+        // Re-render immediately if we have data, otherwise just waits for next update
+        refreshUI(); 
+    }
+    
+    public boolean isWhitePerspective() {
+        return isWhitePerspective;
+    }
 
-                String piece = boardState[row][col];
-                if (piece != null && !piece.isEmpty()) {
-                    Label pieceLabel = new Label(piece);
-                    pieceLabel.setStyle("-fx-font-size: 32px; -fx-font-weight: bold;");
-                    pieceLabel.setAlignment(Pos.CENTER);
+    private void loadResources() {
+        // Map integer constants from ChessGameTracker to filenames
+        // Assuming files are named like "w_pawn.png", "b_knight.png" in resources/pieces/
+        mapImage(ChessGameTracker.W_PAWN, "w_pawn.png");
+        mapImage(ChessGameTracker.W_ROOK, "w_rook.png");
+        mapImage(ChessGameTracker.W_KNIGHT, "w_knight.png");
+        mapImage(ChessGameTracker.W_BISHOP, "w_bishop.png");
+        mapImage(ChessGameTracker.W_QUEEN, "w_queen.png");
+        mapImage(ChessGameTracker.W_KING, "w_king.png");
 
-                    // color letter: uppercase = white (use black text), lowercase = black (use black text too)
-                    // (You can change colors here if you want different text colors per side)
-                    pieceLabel.setTextFill(Color.BLACK);
+        mapImage(ChessGameTracker.B_PAWN, "b_pawn.png");
+        mapImage(ChessGameTracker.B_ROOK, "b_rook.png");
+        mapImage(ChessGameTracker.B_KNIGHT, "b_knight.png");
+        mapImage(ChessGameTracker.B_BISHOP, "b_bishop.png");
+        mapImage(ChessGameTracker.B_QUEEN, "b_queen.png");
+        mapImage(ChessGameTracker.B_KING, "b_king.png");
+    }
 
-                    StackPane.setAlignment(pieceLabel, Pos.CENTER);
-                    square.getUI().getChildren().add(pieceLabel);
-                }
-
-                boardUI.add(square.getUI(), col, row);
+    private void mapImage(int pieceCode, String filename) {
+        try {
+            String path = "/pieces/" + filename;
+            InputStream is = getClass().getResourceAsStream(path);
+            if (is != null) {
+                pieceImages.put(pieceCode, new Image(is));
+            } else {
+                System.err.println("Could not find image: " + path);
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
-    /** Resets the logical board and UI to the default starting position. */
-    public void resetBoard() {
-        initStartingPosition();
-        createBoardUI();
+    /**
+     * Initializes the grid structure (8x8) with background rectangles.
+     */
+    private void initializeBoard() {
+        grid.getChildren().clear();
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                StackPane square = new StackPane();
+                Rectangle bg = new Rectangle(60, 60); // Square size
+                
+                // Color logic (checkerboard pattern)
+                boolean isLight = (row + col) % 2 == 0;
+                bg.setFill(isLight ? lightSquareColor : darkSquareColor);
+                
+                square.getChildren().add(bg);
+                grid.add(square, col, row);
+            }
+        }
     }
 
     /**
-     * Returns a FEN string for the current boardState.
-     * Example starting FEN:
-     * rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+     * Updates the visual board based on the Tracker's logical board state.
+     * Handles the coordinate transformation for perspective.
      */
-    public String getFEN() {
-        StringBuilder fen = new StringBuilder();
-        for (int row = 0; row < SIZE; row++) {
-            int empty = 0;
-            for (int col = 0; col < SIZE; col++) {
-                String piece = boardState[row][col];
-                if (piece == null || piece.isEmpty()) {
-                    empty++;
+    public void updateBoard(int[][] logicalBoard) {
+        // Clear only the pieces, keep the background squares
+        // Actually simpler to just rebuild the contents of the StackPanes
+        
+        for (int logicalRow = 0; logicalRow < 8; logicalRow++) {
+            for (int logicalCol = 0; logicalCol < 8; logicalCol++) {
+                
+                // 1. Determine Visual Coordinates based on perspective
+                int visualRow, visualCol;
+                
+                if (isWhitePerspective) {
+                    // White at bottom (Rank 0 is at bottom visual row 7)
+                    visualRow = 7 - logicalRow;
+                    visualCol = logicalCol;
                 } else {
-                    if (empty > 0) {
-                        fen.append(empty);
-                        empty = 0;
-                    }
-                    fen.append(piece);
+                    // Black at bottom (Rank 7 is at bottom visual row 7)
+                    // So Logic Row 0 (White) is at top visual row 0
+                    visualRow = logicalRow;
+                    // Logic Col 0 (File A) is on the RIGHT side for Black perspective
+                    visualCol = 7 - logicalCol;
                 }
+
+                // 2. Get the StackPane at this grid position
+                StackPane square = getSquareAt(visualRow, visualCol);
+                if (square == null) continue;
+
+                // 3. Clear previous piece image (keep background rectangle at index 0)
+                if (square.getChildren().size() > 1) {
+                    square.getChildren().remove(1, square.getChildren().size());
+                }
+
+                // 4. Add new piece image
+                int piece = logicalBoard[logicalRow][logicalCol];
+                if (piece != ChessGameTracker.EMPTY) {
+                    Image img = pieceImages.get(piece);
+                    if (img != null) {
+                        ImageView iv = new ImageView(img);
+                        iv.setFitWidth(50);
+                        iv.setFitHeight(50);
+                        iv.setPreserveRatio(true);
+                        square.getChildren().add(iv);
+                    } else {
+                        // Fallback text if image missing
+                        Label l = new Label(String.valueOf(piece));
+                        square.getChildren().add(l);
+                    }
+                }
+                
+                // Optional: Add coordinate labels on edges
+                addCoordinates(square, logicalRow, logicalCol, visualRow, visualCol);
             }
-            if (empty > 0) fen.append(empty);
-            if (row < SIZE - 1) fen.append('/');
         }
-        // default side to move and extras; you can change these later programmatically
-        fen.append(" w KQkq - 0 1");
-        return fen.toString();
+    }
+    
+    // Helper to refresh with current state (used when flipping)
+    // Note: requires the main app to pass the board, or we store a local copy.
+    // For simplicity, we assume the main loop calls updateBoard() frequently.
+    private void refreshUI() {
+        // Logic handled by next GamePlay loop update
     }
 
-    /** Returns the GridPane to place in the Scene. */
-    public GridPane getBoardUI() {
-        return boardUI;
+    private StackPane getSquareAt(int row, int col) {
+        for (Node node : grid.getChildren()) {
+            if (GridPane.getRowIndex(node) == row && GridPane.getColumnIndex(node) == col) {
+                return (StackPane) node;
+            }
+        }
+        return null;
     }
-
-    /** Optional: update the board state at a given square and refresh UI */
-    public void setPieceAt(int row, int col, String piece) {
-        boardState[row][col] = piece == null ? "" : piece;
-        createBoardUI();
-    }
-
-    /** Optional: get piece at a given square */
-    public String getPieceAt(int row, int col) {
-        return boardState[row][col];
+    
+    private void addCoordinates(StackPane square, int logRow, int logCol, int visRow, int visCol) {
+        // Add File letters on bottom rank (Visual Row 7)
+        if (visRow == 7) {
+            String file = String.valueOf((char)('a' + logCol));
+            Label l = new Label(file);
+            StackPane.setAlignment(l, Pos.BOTTOM_RIGHT);
+            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 10px; -fx-padding: 2px;");
+            square.getChildren().add(l);
+        }
+        // Add Rank numbers on left file (Visual Col 0)
+        if (visCol == 0) {
+            String rank = String.valueOf(logRow + 1);
+            Label l = new Label(rank);
+            StackPane.setAlignment(l, Pos.TOP_LEFT);
+            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 10px; -fx-padding: 2px;");
+            square.getChildren().add(l);
+        }
     }
 }

@@ -507,4 +507,12 @@ public class ChessGameTracker {
         };
         return piece > 0 ? c : Character.toLowerCase(c);
     }
+
+    public int[][] getBoardArray() {
+        int[][] copy = new int[8][8];
+        for (int i = 0; i < 8; i++) {
+            System.arraycopy(board[i], 0, copy[i], 0, 8);
+        }
+        return copy;
+    }
 }

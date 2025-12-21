@@ -151,4 +151,10 @@ public class ChessMoveLogic {
 
         return changes;
     }
+
+    private static String getNotation(int row, int col) {
+        char file = (char) ('a' + col);
+        int rank = 8 - row;
+        return "" + file + rank;
+    }
 }
