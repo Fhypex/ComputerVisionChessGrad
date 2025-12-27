@@ -52,6 +52,12 @@ tasks.register('runtimePipeline', JavaExec) {
     mainClass = 'com.chessgame.ChessMoveDetectorTest'
 }
 
+tasks.register('realtimePipeline', JavaExec) {
+    group = 'application'
+    description = 'Runs the Change Detection test program'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.chessgame.GamePlay'
+}
 
 
 dependencies {
