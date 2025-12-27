@@ -6,6 +6,7 @@ import org.opencv.imgproc.Imgproc;
 
 // --- NEW JAVA FX IMPORTS ---
 import javafx.application.Platform;
+import javafx.geometry.Point2D;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ScrollPane;
@@ -15,6 +16,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
@@ -24,6 +26,8 @@ import javafx.stage.Stage;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
@@ -635,143 +639,219 @@ public class BoardDetector {
     }
     
     // --- GUI INNER CLASS ---
+    
+    
     public static class ManualBoardPicker {
         private static Point[] resultCorners = null;
         private static final List<Point> clickedPoints = new ArrayList<>();
         private static boolean terminateSignal = false;
-
+    
         public static Point[] showInterface(Image image, Point[] detectedPoints) {
             CountDownLatch latch = new CountDownLatch(1);
             resultCorners = detectedPoints;
             clickedPoints.clear();
             terminateSignal = false;
-
+    
             Platform.runLater(() -> {
                 Stage stage = new Stage();
-                stage.setTitle("Board Selection / Verification");
-
+                stage.setTitle("Manual Board Picker");
+    
                 BorderPane root = new BorderPane();
-                ScrollPane scrollPane = new ScrollPane();
-                scrollPane.setPannable(true);
                 
-                Pane contentContainer = new Pane();
+                // 1. SETUP IMAGE VIEW
                 ImageView imageView = new ImageView(image);
                 imageView.setPreserveRatio(true);
+                imageView.setFitWidth(1000); // Reasonable default size
+                imageView.setFitHeight(800);
                 
-                Pane overlayPane = new Pane();
-                overlayPane.setPrefSize(image.getWidth(), image.getHeight());
-                overlayPane.setMouseTransparent(true); 
-
-                contentContainer.getChildren().addAll(imageView, overlayPane);
-                scrollPane.setContent(contentContainer);
+                // 2. SETUP OVERLAY (For drawing dots)
+                // We put Image and Overlay in a StackPane so they align perfectly
+                StackPane imageStack = new StackPane();
+                javafx.scene.layout.Pane overlayPane = new javafx.scene.layout.Pane();
+                overlayPane.setMouseTransparent(true); // Let clicks pass through to ImageView
+                
+                imageStack.getChildren().addAll(imageView, overlayPane);
+                
+                // Wrap in ScrollPane
+                ScrollPane scrollPane = new ScrollPane(imageStack);
+                scrollPane.setFitToWidth(true);
+                scrollPane.setFitToHeight(true);
+                scrollPane.setPannable(true);
                 root.setCenter(scrollPane);
-
+    
+                // Controls
                 HBox controls = new HBox(15);
                 controls.setStyle("-fx-padding: 15; -fx-background-color: #222; -fx-alignment: center-left;");
+                Text statusText = new Text("Click Top-Left, then Top-Right, etc...");
+                statusText.setFill(Color.CYAN);
+                Button btnConfirm = new Button("Confirm");
+                Button btnReset = new Button("Reset");
+                btnConfirm.setDisable(true);
                 
-                Text statusText = new Text();
-                statusText.setFill(Color.WHITE);
-                statusText.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
-
-                Button btnConfirm = new Button("Confirm Selection");
-                Button btnReset = new Button("Reset / Pick Manually");
-                Button btnTerminate = new Button("TERMINATE PROGRAM");
-                
-                btnConfirm.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
-                btnReset.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white;");
-                btnTerminate.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-weight: bold;");
-
+                controls.getChildren().addAll(statusText, btnReset, btnConfirm);
+                root.setBottom(controls);
+    
+                // --- REDRAW LOGIC ---
                 Runnable redraw = () -> {
                     overlayPane.getChildren().clear();
+                    
+                    // Get the EXACT size the image is currently drawn at
+                    double drawW = imageView.getBoundsInLocal().getWidth();
+                    double drawH = imageView.getBoundsInLocal().getHeight();
+                    
+                    // Safety check
+                    if (drawW == 0 || drawH == 0) return;
+    
+                    // Scale Ratio: ImagePixels / ScreenPixels
+                    // Note: We use this to convert Point -> Screen for drawing
+                    double scaleX = drawW / image.getWidth();
+                    double scaleY = drawH / image.getHeight();
+    
+                    List<Point> pointsToDraw = new ArrayList<>();
                     if (resultCorners != null) {
-                        Point[] ordered = orderPoints(resultCorners);
+                        for(Point p : resultCorners) pointsToDraw.add(p);
+                    } else {
+                        pointsToDraw.addAll(clickedPoints);
+                    }
+    
+                    for (int i = 0; i < pointsToDraw.size(); i++) {
+                        Point p = pointsToDraw.get(i);
+                        // Draw at Screen Coordinates
+                        double screenX = p.x * scaleX;
+                        double screenY = p.y * scaleY;
+                        
+                        // Offset correction: The overlay matches the StackPane size, 
+                        // but the ImageView might be centered within it. 
+                        // Actually, in StackPane, they are centered. 
+                        // We need to translate coordinates relative to the ImageView's position in the StackPane.
+                        // BETTER APPROACH: Add the circle directly to the overlay, but calculate offset.
+                        // Since overlay covers the whole StackPane, and ImageView is centered:
+                        double offsetX = (imageStack.getWidth() - drawW) / 2;
+                        double offsetY = (imageStack.getHeight() - drawH) / 2;
+                        // If StackPane hasn't laid out yet, this might be 0. 
+                        // To be safe, we rely on the Click Event which gives us coordinates relative to ImageView.
+                    }
+                    
+                    // SIMPLIFIED DRAWING:
+                    // We will redraw purely based on the click logic below to ensure visual sync.
+                    // But for the lines, we need the stored points.
+                    
+                    // Let's rely on the coordinate converter helper
+                    for (int i = 0; i < pointsToDraw.size(); i++) {
+                        Point p = pointsToDraw.get(i);
+                        // Convert Image Pixel -> Local ImageView Coordinate
+                        double localX = p.x * scaleX;
+                        double localY = p.y * scaleY;
+                        
+                        // Convert Local ImageView -> Overlay Coordinate
+                        // (Because Overlay is on top of ImageView in StackPane, their (0,0) matches IF size matches)
+                        // But StackPane centers smaller children. 
+                        Point2D overlayPoint = imageView.localToParent(localX, localY);
+                        
+                        Circle c = new Circle(overlayPoint.getX(), overlayPoint.getY(), 5, Color.CYAN);
+                        c.setStroke(Color.WHITE);
+                        overlayPane.getChildren().add(c);
+                    }
+                    
+                    if (pointsToDraw.size() == 4) {
+                        Point[] sorted = sortPoints(pointsToDraw.toArray(new Point[0]));
                         for (int i = 0; i < 4; i++) {
-                            Line l = new Line(ordered[i].x, ordered[i].y, ordered[(i+1)%4].x, ordered[(i+1)%4].y);
+                            Point p1 = sorted[i];
+                            Point p2 = sorted[(i+1)%4];
+                            
+                            Point2D s1 = imageView.localToParent(p1.x * scaleX, p1.y * scaleY);
+                            Point2D s2 = imageView.localToParent(p2.x * scaleX, p2.y * scaleY);
+                            
+                            Line l = new Line(s1.getX(), s1.getY(), s2.getX(), s2.getY());
                             l.setStroke(Color.LIME);
-                            l.setStrokeWidth(3);
+                            l.setStrokeWidth(2);
                             overlayPane.getChildren().add(l);
                         }
-                        for (int i = 0; i < 4; i++) {
-                            Circle c = new Circle(ordered[i].x, ordered[i].y, 8, Color.LIME);
-                            c.setStroke(Color.BLACK);
-                            Text t = new Text(ordered[i].x + 15, ordered[i].y - 15, String.valueOf(i));
-                            t.setFill(Color.YELLOW);
-                            t.setStyle("-fx-font-weight: bold; -fx-font-size: 18px; -fx-stroke: black;");
-                            overlayPane.getChildren().addAll(c, t);
-                        }
-                        statusText.setText("Status: Corners Selected. Confirm to proceed.");
-                        statusText.setFill(Color.LIGHTGREEN);
                         btnConfirm.setDisable(false);
-                    } else {
-                        for (int i = 0; i < clickedPoints.size(); i++) {
-                            Point p = clickedPoints.get(i);
-                            Circle c = new Circle(p.x, p.y, 6, Color.CYAN);
-                            c.setStroke(Color.WHITE);
-                            Text t = new Text(p.x + 10, p.y, String.valueOf(i + 1));
-                            t.setFill(Color.CYAN);
-                            t.setStyle("-fx-font-weight: bold; -fx-font-size: 16px;");
-                            overlayPane.getChildren().addAll(c, t);
-                        }
-                        statusText.setText("Manual Mode: Click " + (clickedPoints.size()) + "/4 corners.");
-                        statusText.setFill(Color.CYAN);
-                        btnConfirm.setDisable(true);
                     }
                 };
-
-                contentContainer.setOnMouseClicked(e -> {
+    
+                // --- CLICK HANDLER (THE FIX) ---
+                // We listen on the ImageView directly. 
+                // e.getX() will be relative to the image corner, IGNORING padding/gray bars.
+                imageView.setOnMouseClicked(e -> {
                     if (resultCorners == null && e.getButton() == MouseButton.PRIMARY && clickedPoints.size() < 4) {
-                        clickedPoints.add(new Point(e.getX(), e.getY()));
+                        
+                        double drawW = imageView.getBoundsInLocal().getWidth();
+                        double drawH = imageView.getBoundsInLocal().getHeight();
+                        
+                        // 1. Calculate the Ratio (Real Pixels per Screen Pixel)
+                        double ratioX = image.getWidth() / drawW;
+                        double ratioY = image.getHeight() / drawH;
+                        
+                        // 2. Convert Screen Click -> Image Pixel
+                        double imgX = e.getX() * ratioX;
+                        double imgY = e.getY() * ratioY;
+                        
+                        clickedPoints.add(new Point(imgX, imgY));
+                        
                         if (clickedPoints.size() == 4) {
-                            Point[] pts = new Point[4];
-                            for(int i=0; i<4; i++) pts[i] = clickedPoints.get(i);
-                            resultCorners = orderPoints(pts);
+                             // Sort immediately to prevent bowtie
+                            resultCorners = sortPoints(clickedPoints.toArray(new Point[0]));
                         }
                         redraw.run();
                     }
                 });
-
+    
                 btnReset.setOnAction(e -> {
                     resultCorners = null;
                     clickedPoints.clear();
                     redraw.run();
+                    btnConfirm.setDisable(true);
                 });
-
+    
                 btnConfirm.setOnAction(e -> {
+                    // Final safety sort
+                    if (resultCorners == null && clickedPoints.size() == 4) {
+                        resultCorners = sortPoints(clickedPoints.toArray(new Point[0]));
+                    }
                     stage.close();
                     latch.countDown();
                 });
-
-                btnTerminate.setOnAction(e -> {
-                    resultCorners = null;
-                    terminateSignal = true;
-                    stage.close();
-                    latch.countDown();
-                });
-
-                controls.getChildren().addAll(statusText, btnReset, btnConfirm, btnTerminate);
-                root.setBottom(controls);
-
+    
                 Scene scene = new Scene(root, 1000, 800);
                 stage.setScene(scene);
-                
-                // If passed valid points, draw them. If null, go to manual mode.
-                if (resultCorners == null) {
-                    btnReset.fire();
-                } else {
-                    redraw.run();
-                }
-                
                 stage.show();
+                
+                // Run redraw once layout passes to ensure dots align
+                Platform.runLater(redraw);
             });
-
+    
             try {
                 latch.await();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            } catch (InterruptedException e) { e.printStackTrace(); }
+    
+            return terminateSignal ? null : resultCorners;
+        }
+    
+        // --- GEOMETRIC SORTING (Prevents "Bowtie" corruption) ---
+        private static Point[] sortPoints(Point[] pts) {
+            if (pts == null || pts.length != 4) return pts;
             
-            if (terminateSignal) return null;
-            return resultCorners;
+            // 1. Sort by Y to separate Top (0,1) from Bottom (2,3)
+            List<Point> sortedY = new ArrayList<>();
+            for(Point p : pts) sortedY.add(p);
+            Collections.sort(sortedY, Comparator.comparingDouble(p -> p.y));
+    
+            Point tl = sortedY.get(0);
+            Point tr = sortedY.get(1);
+            Point bl = sortedY.get(2);
+            Point br = sortedY.get(3);
+    
+            // 2. Sort the top two by X
+            if (tl.x > tr.x) { Point temp = tl; tl = tr; tr = temp; }
+            
+            // 3. Sort the bottom two by X
+            if (bl.x > br.x) { Point temp = bl; bl = br; br = temp; }
+    
+            // Returns: TopLeft, TopRight, BottomRight, BottomLeft
+            // This matches OpenCV standard cyclic order usually
+            return new Point[] { tl, tr, br, bl };
         }
     }
 }

@@ -112,7 +112,7 @@ public class ChessMoveLogic {
                 // A moved piece will cause high Intensity Score AND high Edge Score.
 
                 double INTENSITY_THRESH = 15.0; // Was 15.0
-                double EDGE_THRESH = 3.0;       // Requires ~3% of pixels to be different edges
+                double EDGE_THRESH = 2.0;       // Requires ~3% of pixels to be different edges
 
                 boolean isChanged = false;
 

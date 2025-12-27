@@ -49,20 +49,20 @@ public class ChessBoard {
 
     private void loadResources() {
         // Map integer constants from ChessGameTracker to filenames
-        // Assuming files are named like "w_pawn.png", "b_knight.png" in resources/pieces/
-        mapImage(ChessGameTracker.W_PAWN, "w_pawn.png");
-        mapImage(ChessGameTracker.W_ROOK, "w_rook.png");
-        mapImage(ChessGameTracker.W_KNIGHT, "w_knight.png");
-        mapImage(ChessGameTracker.W_BISHOP, "w_bishop.png");
-        mapImage(ChessGameTracker.W_QUEEN, "w_queen.png");
-        mapImage(ChessGameTracker.W_KING, "w_king.png");
+        // Assuming files are named like "w_pawn.jpg", "b_knight.jpg" in resources/pieces/
+        mapImage(ChessGameTracker.W_PAWN, "w_pawn.jpg");
+        mapImage(ChessGameTracker.W_ROOK, "w_rook.jpg");
+        mapImage(ChessGameTracker.W_KNIGHT, "w_knight.jpg");
+        mapImage(ChessGameTracker.W_BISHOP, "w_bishop.jpg");
+        mapImage(ChessGameTracker.W_QUEEN, "w_queen.jpg");
+        mapImage(ChessGameTracker.W_KING, "w_king.jpg");
 
-        mapImage(ChessGameTracker.B_PAWN, "b_pawn.png");
-        mapImage(ChessGameTracker.B_ROOK, "b_rook.png");
-        mapImage(ChessGameTracker.B_KNIGHT, "b_knight.png");
-        mapImage(ChessGameTracker.B_BISHOP, "b_bishop.png");
-        mapImage(ChessGameTracker.B_QUEEN, "b_queen.png");
-        mapImage(ChessGameTracker.B_KING, "b_king.png");
+        mapImage(ChessGameTracker.B_PAWN, "b_pawn.jpg");
+        mapImage(ChessGameTracker.B_ROOK, "b_rook.jpg");
+        mapImage(ChessGameTracker.B_KNIGHT, "b_knight.jpg");
+        mapImage(ChessGameTracker.B_BISHOP, "b_bishop.jpg");
+        mapImage(ChessGameTracker.B_QUEEN, "b_queen.jpg");
+        mapImage(ChessGameTracker.B_KING, "b_king.jpg");
     }
 
     private void mapImage(int pieceCode, String filename) {

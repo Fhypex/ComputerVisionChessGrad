@@ -121,9 +121,10 @@ public class ChessMoveDetectorTest {
                 System.out.println("Visual Changes: " + changedSquares);
 
                 // 5. Identify and Validate Move
-                String move = tracker.processChangedSquares(changedSquares);
-
-                if (move != null) {
+                //String move = tracker.processChangedSquares(changedSquares);
+                String move = null;
+                /* 
+                if (move != null && ) {
                     System.out.println(">>> CONFIRMED MOVE: " + move + " <<<");
                     tracker.printBoard();
                     System.out.println("FEN: " + tracker.getFEN());
@@ -158,6 +159,7 @@ public class ChessMoveDetectorTest {
                     }
                     // Loop continues...
                 }
+                */
             }
         }
         

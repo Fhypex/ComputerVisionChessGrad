@@ -18,6 +18,8 @@ public class ChessGameTracker {
     private boolean blackRookA8Moved, blackRookH8Moved;
     private String lastEnPassantSquare;
     private List<String> moveHistory;
+
+    private Stack<GameState> history = new Stack<>();
     
     // NEW: Game Over Flag
     private boolean isGameOver;
@@ -29,6 +31,27 @@ public class ChessGameTracker {
         this.isGameOver = false;
         initializeBoard();
         initializeCastlingRights();
+    }  
+
+    private static class GameState {
+        int[][] boardSnapshot;
+        boolean wasWhiteTurn;
+        boolean wasGameOver;
+        // Add other state variables here if you have them (e.g., castling rights, enPassantTarget)
+
+        public GameState(int[][] board, boolean isWhiteTurn, boolean isGameOver) {
+            this.boardSnapshot = deepCopy(board); // Crucial: Deep copy!
+            this.wasWhiteTurn = isWhiteTurn;
+            this.wasGameOver = isGameOver;
+        }
+
+        private int[][] deepCopy(int[][] source) {
+            int[][] dest = new int[8][8];
+            for (int i = 0; i < 8; i++) {
+                System.arraycopy(source[i], 0, dest[i], 0, 8);
+            }
+            return dest;
+        }
     }
 
     private void initializeBoard() {
@@ -66,23 +89,67 @@ public class ChessGameTracker {
      * ROBUST MOVE DETECTION:
      * Validates moves against the board state to ignore noise (splashes).
      */
-    public String processChangedSquares(List<String> changedSquares) {
+    // --- NEW: Detailed Result Class ---
+    public static class MoveResult {
+        public enum Type { 
+            NONE,       // No changes at all (Silence)
+            VALID,      // Good move
+            ILLEGAL,    // Touched own piece, but move was invalid
+            NOISE       // Changes detected, but no pieces involved (shadows, etc.)
+        }
+        
+        public Type type;
+        public String moveNotation; 
+        public String details;
+
+        // Factory methods for cleaner code
+        public static MoveResult none() { 
+            MoveResult r = new MoveResult(); r.type = Type.NONE; return r; 
+        }
+        public static MoveResult valid(String move) {
+            MoveResult r = new MoveResult(); r.type = Type.VALID; r.moveNotation = move; return r;
+        }
+        public static MoveResult illegal(String reason) {
+            MoveResult r = new MoveResult(); r.type = Type.ILLEGAL; r.details = reason; return r;
+        }
+        public static MoveResult noise() {
+            MoveResult r = new MoveResult(); r.type = Type.NOISE; return r;
+        }
+    }
+
+    /**
+     * UPDATED: Detects NONE vs NOISE vs ILLEGAL vs VALID
+     */
+    public MoveResult processChangedSquares(List<String> changedSquares) {
+        
+        // 1. GAME OVER CHECK
         if (isGameOver) {
             System.out.println(">>> GAME IS OVER. No more moves accepted. <<<");
-            return null;
+            return MoveResult.noise();
         }
 
+        // 2. CHECK FOR "NO MOVE AT ALL" (Static)
         if (changedSquares == null || changedSquares.isEmpty()) {
-            return null;
+            return MoveResult.none(); // Explicitly return NONE
         }
 
+        // 3. NEW: HAND / OBSTRUCTION CHECK
+        // If many squares changed (e.g., > 7), a hand or arm is likely covering the board.
+        // We return NOISE so the game ignores this frame completely.
+        if (changedSquares.size() > 7) {
+            // System.out.println("Too many changes (" + changedSquares.size() + ") - Ignoring as noise/hand.");
+            return MoveResult.noise();
+        }
+
+        // --- YOUR ORIGINAL LOGIC STARTS HERE ---
+        
         List<int[]> allChanges = new ArrayList<>();
         // FIX: Convert to lowercase to prevent IndexOutOfBoundsException
         for (String s : changedSquares) {
             allChanges.add(squareToCoords(s));
         }
 
-        // 1. Identify potential Actors (Squares with current player's pieces)
+        // Identify potential Actors (Squares with current player's pieces)
         List<int[]> candidatesFrom = new ArrayList<>();
         for (int[] c : allChanges) {
             int p = board[c[0]][c[1]];
@@ -91,11 +158,11 @@ public class ChessGameTracker {
             }
         }
 
-        // 2. CHECK CASTLING (Priority)
+        // CHECK CASTLING (Priority)
         String castlingMove = findCastlingMove(allChanges);
-        if (castlingMove != null) return castlingMove;
+        if (castlingMove != null) return MoveResult.valid(castlingMove);
 
-        // 3. CHECK NORMAL MOVES
+        // CHECK NORMAL MOVES
         // Try every combination of From -> To within the changed list
         for (int[] from : candidatesFrom) {
             for (int[] to : allChanges) {
@@ -103,17 +170,54 @@ public class ChessGameTracker {
 
                 int piece = board[from[0]][from[1]];
                 if (isLegalMove(piece, from, to)) {
+                    saveGameState();
                     // Valid move found. Ignore any other "splash" squares.
-                    return executeMove(from, to, piece);
+                    String moveStr = executeMove(from, to, piece);
+                    return MoveResult.valid(moveStr);
                 }
             }
         }
 
-        // 4. CHECK EN PASSANT
+        // CHECK EN PASSANT
         String epMove = findEnPassantMove(candidatesFrom, allChanges);
-        if (epMove != null) return epMove;
+        if (epMove != null) return MoveResult.valid(epMove);
 
-        return null;
+        // --- END OF YOUR LOGIC ---
+
+        // --- DECISION: ILLEGAL vs NOISE ---
+        
+        // If 'candidatesFrom' is NOT empty, it means the player touched their own piece,
+        // but your logic above didn't find a valid move. This is an ILLEGAL move.
+        if (!candidatesFrom.isEmpty()) {
+            return MoveResult.illegal("Touched " + coordsToSquare(candidatesFrom.get(0)) + " but move was invalid.");
+        }
+
+        // If no pieces were touched (candidatesFrom is empty), but changes happened,
+        // it's just shadow/noise.
+        return MoveResult.noise();
+    }
+
+    private void saveGameState() {
+        history.push(new GameState(this.board, this.whiteToMove, this.isGameOver));
+    }
+
+    /**
+     * Reverts the game to the previous state.
+     */
+    public void undoLastMove() {
+        if (history.isEmpty()) {
+            System.out.println(">>> History empty. Cannot undo.");
+            return;
+        }
+
+        GameState previousState = history.pop();
+        
+        // Restore State
+        this.board = previousState.boardSnapshot;
+        this.whiteToMove = previousState.wasWhiteTurn;
+        this.isGameOver = previousState.wasGameOver;
+        
+        System.out.println(">>> UNDO SUCCESSFUL. It is now " + (whiteToMove ? "White" : "Black") + "'s turn.");
     }
 
     private String executeMove(int[] from, int[] to, int piece) {

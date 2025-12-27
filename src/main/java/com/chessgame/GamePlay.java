@@ -18,6 +18,8 @@ import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 
+import com.chessgame.ChessGameTracker.MoveResult;
+
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -47,6 +49,8 @@ public class GamePlay extends Application {
         cameraViewer = new CameraViewer();
         cameraViewer.startCamera();
 
+        chessBoardUI.updateBoard(tracker.getBoardArray());
+
         logArea = new TextArea();
         logArea.setEditable(false);
         logArea.setPrefHeight(150);
@@ -64,6 +68,10 @@ public class GamePlay extends Application {
         btnStopGame.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
         btnStopGame.setOnAction(e -> stopGameLoop());
 
+        Button btnUndo = new Button("Undo Last Move");
+        btnUndo.setStyle("-fx-background-color: #FF9800; -fx-text-fill: white; -fx-font-weight: bold;");
+        btnUndo.setOnAction(e -> performUndo());
+
         Button btnFlip = new Button("Flip View");
         btnFlip.setStyle("-fx-background-color: #555; -fx-text-fill: white;");
         btnFlip.setOnAction(e -> {
@@ -74,7 +82,7 @@ public class GamePlay extends Application {
         });
 
     // Add btnFlip to your controlBox HBox
-        HBox controlBox = new HBox(15, btnStartGame, btnStopGame, btnFlip, statusLabel);
+        HBox controlBox = new HBox(15, btnStartGame, btnStopGame, btnFlip, btnUndo , statusLabel);
         // Layouts
         controlBox.setPadding(new Insets(10));
         controlBox.setStyle("-fx-background-color: #333; -fx-alignment: center-left;");
@@ -170,50 +178,69 @@ public class GamePlay extends Application {
 
                 // 3. Detect Changes
                 List<String> changedSquares = ChessMoveLogic.detectSquareChanges(prevWarpedImage, currentWarped);
-
+                System.out.println(changedSquares);
                 // If visual changes detected, try to process logic
                 if (!changedSquares.isEmpty()) {
+                    System.out.println(changedSquares);
                     Platform.runLater(() -> log("Visual change detected: " + changedSquares));
 
                     // 4. Process Move Logic
-                    String move = tracker.processChangedSquares(changedSquares);
-
+                    MoveResult result = tracker.processChangedSquares(changedSquares);
+                    System.out.println(result.toString());
                     Platform.runLater(() -> {
-                        if (move != null) {
+                    switch (result.type) {
+                        case NONE:
+                            // --- NOTHING CHANGED ---
+                            // The board is static. We do nothing.
+                            break;
+
+                        case VALID:
                             // --- VALID MOVE ---
-                            log(">>> MOVE PLAYED: " + move);
+                            log(">>> MOVE PLAYED: " + result.moveNotation);
+                            tracker.printBoard(); // Update console
+                            chessBoardUI.updateBoard(tracker.getBoardArray());
                             
-                            // Update UI Board (Requires your ChessBoard class to have a method like movePiece)
-                            // chessBoardUI.executeMove(move); 
-                            
-                            // Update FEN/Console
-                            tracker.printBoard();
-                            
+                            // Visual feedback (Optional, if you have this method)
+                            // chessBoardUI.executeMove(result.moveNotation); 
+
                             // Check for Mate
-                            if (move.endsWith("#")) {
+                            if (result.moveNotation.endsWith("#")) {
                                 showInfo("Game Over", "Checkmate detected!");
                                 stopGameLoop();
                             }
 
-                            // Update Reference Image for next turn
+                            // CRITICAL: Lock in the new board state
                             prevWarpedImage = currentWarped; 
-                        } else {
-                            // --- ILLEGAL MOVE / NOISE ---
-                            // Tracker returns null if logic fails but input was present
-                            log("!!! ILLEGAL MOVE or NOISE DETECTED !!!");
-                            showIllegalMoveAlert(changedSquares.toString());
+                            break;
+
+                        case ILLEGAL:
+                            // --- ILLEGAL MOVE ---
+                            // User touched a piece but placed it invalidly
+                            log("!!! ILLEGAL MOVE: " + result.details);
+                            showIllegalMoveAlert(result.details);
                             
                             // IMPORTANT: We do NOT update prevWarpedImage. 
                             // The system expects the user to undo the bad move on the physical board.
-                        }
-                    });
+                            break;
+
+                        case NOISE:
+                            // --- VISUAL NOISE ---
+                            // Hand hovering, shadows, but no clear piece movement detected.
+                            // We only log this if there were actual visual changes, to avoid spam.
+                            if (!changedSquares.isEmpty()) {
+                                log("... (Ignored visual noise/shadows) ...");
+                            }
+                            // We do NOT update prevWarpedImage.
+                            break;
+                    }
+                });
                 }
 
             } catch (Exception e) {
                 e.printStackTrace();
                 Platform.runLater(() -> log("Error in Game Loop: " + e.getMessage()));
             }
-        }, 1000, 1000, TimeUnit.MILLISECONDS);
+        }, 4000, 4000, TimeUnit.MILLISECONDS);
     }
 
     private void stopGameLoop() {
@@ -222,6 +249,8 @@ public class GamePlay extends Application {
             gameLoopExecutor.shutdownNow();
         }
         statusLabel.setText("Status: STOPPED");
+        tracker = new ChessGameTracker();
+        chessBoardUI.updateBoard(tracker.getBoardArray());
         log("Game tracking stopped.");
     }
 
@@ -237,6 +266,29 @@ public class GamePlay extends Application {
         // but the background thread might keep running. 
         // We pause tracking flag briefly or just let the user fix it.
         alert.showAndWait();
+    }
+
+    private void performUndo() {
+        if (tracker == null) return;
+
+        log(">>> Undoing last move...");
+
+        // 1. Revert internal game logic (You need to ensure this method exists in ChessGameTracker)
+        tracker.undoLastMove(); 
+
+        // 2. Update UI to match the reverted internal state
+        chessBoardUI.updateBoard(tracker.getBoardArray());
+
+        // 3. Reset Visual Tracking Base
+        // We assume the user has physically corrected the board before clicking Undo.
+        // We capture the CURRENT frame as the new "safe" baseline.
+        if (isTracking && cameraViewer != null) {
+             Mat currentFrame = cameraViewer.captureCurrentFrame();
+             if (currentFrame != null && !currentFrame.empty() && boardCorners != null) {
+                 this.prevWarpedImage = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
+                 log("Visual tracker reset to current board state.");
+             }
+        }
     }
 
     private void showError(String title, String content) {
