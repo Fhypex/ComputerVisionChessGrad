@@ -32,6 +32,7 @@ public class GamePlay extends Application {
     private ChessBoard chessBoardUI; // Your UI visualization of the board
     private TextArea logArea;
     private Label statusLabel;
+    private HttpHandDetector handDetector;
 
     // Game State Variables
     private Point[] boardCorners;
@@ -48,6 +49,9 @@ public class GamePlay extends Application {
         // Initialize UI Components
         cameraViewer = new CameraViewer();
         cameraViewer.startCamera();
+
+        // Initialize hand detector (expects local mediapipe server)
+        handDetector = new HttpHandDetector("http://127.0.0.1:8000/detect");
 
         chessBoardUI.updateBoard(tracker.getBoardArray());
 
@@ -173,6 +177,18 @@ public class GamePlay extends Application {
                 Mat currentFrame = cameraViewer.captureCurrentFrame();
                 if (currentFrame == null || currentFrame.empty()) return;
 
+                // 1.5 Check for hand presence (skip processing if hand detected)
+                try {
+                    boolean hand = handDetector != null && handDetector.isHandPresent(currentFrame, 0.5);
+                    if (hand) {
+                        Platform.runLater(() -> log("Hand detected in frame — skipping processing."));
+                        // Do not update prevWarpedImage; wait until user removes hand
+                        return;
+                    }
+                } catch (Exception e) {
+                    // If detection fails, continue normal processing (fail open)
+                    System.err.println("Hand detection failed: " + e.getMessage());
+                }
                 // 2. Warp (Using fixed corners)
                 Mat currentWarped = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
 

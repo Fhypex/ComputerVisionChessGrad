@@ -1,0 +1,9 @@
+# Sanal ortamları engelle
+venv/
+mp_test_venv/
+__pycache__/
+*.pyc
+
+# IDE ayarlarını engelle
+.vscode/
+.idea/
