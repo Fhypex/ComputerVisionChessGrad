@@ -39,11 +39,11 @@ public class GamePlay extends Application {
     private Mat prevWarpedImage;
     private ScheduledExecutorService gameLoopExecutor;
     private boolean isTracking = false;
-
+    private boolean computerIsBlack = false;
     @Override
     public void start(Stage stage) {
         // Initialize Core Logic
-        tracker = new ChessGameTracker();
+        tracker = new ChessGameTracker(computerIsBlack);
         chessBoardUI = new ChessBoard();
 
         // Initialize UI Components
@@ -82,7 +82,9 @@ public class GamePlay extends Application {
             boolean current = chessBoardUI.isWhitePerspective();
             chessBoardUI.setPerspective(!current);
             // Force an immediate redraw using the tracker's current internal board
-            chessBoardUI.updateBoard(tracker.getBoardArray()); 
+            chessBoardUI.updateBoard(tracker.getBoardArray());             
+            computerIsBlack = !computerIsBlack
+            tracker = new ChessGameTracker(computerIsBlack);
         });
 
     // Add btnFlip to your controlBox HBox

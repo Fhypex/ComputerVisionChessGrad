@@ -21,26 +21,32 @@ public class ChessGameTracker {
 
     private Stack<GameState> history = new Stack<>();
     
-    // NEW: Game Over Flag
     private boolean isGameOver;
+    
+    // NEW: POV - false = white close to camera, true = black close to camera
+    private boolean blackPOV;
 
     public ChessGameTracker() {
+        this(false); // Default: white perspective
+    } 
+
+    public ChessGameTracker(boolean blackPOV) {
         this.board = new int[8][8];
-        this.whiteToMove = true; // Game always starts with white
+        this.whiteToMove = true;
         this.moveHistory = new ArrayList<>();
         this.isGameOver = false;
+        this.blackPOV = blackPOV;
         initializeBoard();
         initializeCastlingRights();
-    }  
+    } 
 
     private static class GameState {
         int[][] boardSnapshot;
         boolean wasWhiteTurn;
         boolean wasGameOver;
-        // Add other state variables here if you have them (e.g., castling rights, enPassantTarget)
 
         public GameState(int[][] board, boolean isWhiteTurn, boolean isGameOver) {
-            this.boardSnapshot = deepCopy(board); // Crucial: Deep copy!
+            this.boardSnapshot = deepCopy(board);
             this.wasWhiteTurn = isWhiteTurn;
             this.wasGameOver = isGameOver;
         }
@@ -60,49 +66,111 @@ public class ChessGameTracker {
             Arrays.fill(board[i], EMPTY);
         }
 
-        // White pieces (rank 0 and 1)
-        board[0][0] = W_ROOK; board[0][7] = W_ROOK;
-        board[0][1] = W_KNIGHT; board[0][6] = W_KNIGHT;
-        board[0][2] = W_BISHOP; board[0][5] = W_BISHOP;
-        board[0][3] = W_QUEEN; board[0][4] = W_KING;
-        for (int i = 0; i < 8; i++) board[1][i] = W_PAWN;
+        if (!blackPOV) {
+            // WHITE POV: White pieces at bottom (rank 0-1)
+            board[0][0] = W_ROOK; board[0][7] = W_ROOK;
+            board[0][1] = W_KNIGHT; board[0][6] = W_KNIGHT;
+            board[0][2] = W_BISHOP; board[0][5] = W_BISHOP;
+            board[0][3] = W_QUEEN; board[0][4] = W_KING;
+            for (int i = 0; i < 8; i++) board[1][i] = W_PAWN;
 
-        // Black pieces (rank 6 and 7)
-        for (int i = 0; i < 8; i++) board[6][i] = B_PAWN;
-        board[7][0] = B_ROOK; board[7][7] = B_ROOK;
-        board[7][1] = B_KNIGHT; board[7][6] = B_KNIGHT;
-        board[7][2] = B_BISHOP; board[7][5] = B_BISHOP;
-        board[7][3] = B_QUEEN; board[7][4] = B_KING;
+            // Black pieces at top (rank 6-7)
+            for (int i = 0; i < 8; i++) board[6][i] = B_PAWN;
+            board[7][0] = B_ROOK; board[7][7] = B_ROOK;
+            board[7][1] = B_KNIGHT; board[7][6] = B_KNIGHT;
+            board[7][2] = B_BISHOP; board[7][5] = B_BISHOP;
+            board[7][3] = B_QUEEN; board[7][4] = B_KING;
+        } else {
+            // BLACK POV: Black pieces at bottom (rank 0-1)
+            // Files are also reversed: h g f e d c b a (7 6 5 4 3 2 1 0)
+            board[0][7] = B_ROOK; board[0][0] = B_ROOK;
+            board[0][6] = B_KNIGHT; board[0][1] = B_KNIGHT;
+            board[0][5] = B_BISHOP; board[0][2] = B_BISHOP;
+            board[0][4] = B_QUEEN; board[0][3] = B_KING;
+            for (int i = 0; i < 8; i++) board[1][i] = B_PAWN;
+
+            // White pieces at top (rank 6-7)
+            for (int i = 0; i < 8; i++) board[6][i] = W_PAWN;
+            board[7][7] = W_ROOK; board[7][0] = W_ROOK;
+            board[7][6] = W_KNIGHT; board[7][1] = W_KNIGHT;
+            board[7][5] = W_BISHOP; board[7][2] = W_BISHOP;
+            board[7][4] = W_QUEEN; board[7][3] = W_KING;
+        }
     }
 
     private void initializeCastlingRights() {
         whiteKingMoved = false;
         blackKingMoved = false;
-        whiteRookA1Moved = false;
-        whiteRookH1Moved = false;
-        blackRookA8Moved = false;
-        blackRookH8Moved = false;
+        
+        if (!blackPOV) {
+            // White POV: Standard positions
+            whiteRookA1Moved = false;  // a1 = [0][0]
+            whiteRookH1Moved = false;  // h1 = [0][7]
+            blackRookA8Moved = false;  // a8 = [7][0]
+            blackRookH8Moved = false;  // h8 = [7][7]
+        } else {
+            // Black POV: Mirrored positions
+            whiteRookA1Moved = false;  // a1 = [7][7]
+            whiteRookH1Moved = false;  // h1 = [7][0]
+            blackRookA8Moved = false;  // a8 = [0][7]
+            blackRookH8Moved = false;  // h8 = [0][0]
+        }
+        
         lastEnPassantSquare = "-";
     }
 
     /**
-     * ROBUST MOVE DETECTION:
-     * Validates moves against the board state to ignore noise (splashes).
+     * Converts camera square notation to logical chess coordinates
+     * considering the POV (perspective)
      */
-    // --- NEW: Detailed Result Class ---
+    private int[] squareToCoords(String square) {
+        String lower = square.toLowerCase();
+        
+        if (!blackPOV) {
+            // White POV: Standard chess notation
+            int file = lower.charAt(0) - 'a';  // a=0, h=7
+            int rank = lower.charAt(1) - '1';  // 1=0, 8=7
+            return new int[]{rank, file};
+        } else {
+            // Black POV: Reversed
+            // Camera sees: a b c d e f g h as h g f e d c b a
+            // Camera sees: 1 2 3 4 5 6 7 8 as 8 7 6 5 4 3 2 1
+            int file = 7 - (lower.charAt(0) - 'a');  // a=7, h=0
+            int rank = 7 - (lower.charAt(1) - '1');  // 1=7, 8=0
+            return new int[]{rank, file};
+        }
+    }
+
+    /**
+     * Converts logical chess coordinates to standard notation
+     * considering the POV
+     */
+    private String coordsToSquare(int[] coords) {
+        if (!blackPOV) {
+            // White POV: Standard
+            char file = (char) ('a' + coords[1]);
+            char rank = (char) ('1' + coords[0]);
+            return "" + file + rank;
+        } else {
+            // Black POV: Reversed back to standard notation
+            char file = (char) ('a' + (7 - coords[1]));
+            char rank = (char) ('1' + (7 - coords[0]));
+            return "" + file + rank;
+        }
+    }
+
     public static class MoveResult {
         public enum Type { 
-            NONE,       // No changes at all (Silence)
-            VALID,      // Good move
-            ILLEGAL,    // Touched own piece, but move was invalid
-            NOISE       // Changes detected, but no pieces involved (shadows, etc.)
+            NONE,
+            VALID,
+            ILLEGAL,
+            NOISE
         }
         
         public Type type;
         public String moveNotation; 
         public String details;
 
-        // Factory methods for cleaner code
         public static MoveResult none() { 
             MoveResult r = new MoveResult(); r.type = Type.NONE; return r; 
         }
@@ -117,39 +185,26 @@ public class ChessGameTracker {
         }
     }
 
-    /**
-     * UPDATED: Detects NONE vs NOISE vs ILLEGAL vs VALID
-     */
     public MoveResult processChangedSquares(List<String> changedSquares) {
         
-        // 1. GAME OVER CHECK
         if (isGameOver) {
             System.out.println(">>> GAME IS OVER. No more moves accepted. <<<");
             return MoveResult.noise();
         }
 
-        // 2. CHECK FOR "NO MOVE AT ALL" (Static)
         if (changedSquares == null || changedSquares.isEmpty()) {
-            return MoveResult.none(); // Explicitly return NONE
+            return MoveResult.none();
         }
 
-        // 3. NEW: HAND / OBSTRUCTION CHECK
-        // If many squares changed (e.g., > 7), a hand or arm is likely covering the board.
-        // We return NOISE so the game ignores this frame completely.
         if (changedSquares.size() > 7) {
-            // System.out.println("Too many changes (" + changedSquares.size() + ") - Ignoring as noise/hand.");
             return MoveResult.noise();
         }
-
-        // --- YOUR ORIGINAL LOGIC STARTS HERE ---
         
         List<int[]> allChanges = new ArrayList<>();
-        // FIX: Convert to lowercase to prevent IndexOutOfBoundsException
         for (String s : changedSquares) {
             allChanges.add(squareToCoords(s));
         }
 
-        // Identify potential Actors (Squares with current player's pieces)
         List<int[]> candidatesFrom = new ArrayList<>();
         for (int[] c : allChanges) {
             int p = board[c[0]][c[1]];
@@ -158,12 +213,9 @@ public class ChessGameTracker {
             }
         }
 
-        // CHECK CASTLING (Priority)
         String castlingMove = findCastlingMove(allChanges);
         if (castlingMove != null) return MoveResult.valid(castlingMove);
 
-        // CHECK NORMAL MOVES
-        // Try every combination of From -> To within the changed list
         for (int[] from : candidatesFrom) {
             for (int[] to : allChanges) {
                 if (Arrays.equals(from, to)) continue;
@@ -171,29 +223,19 @@ public class ChessGameTracker {
                 int piece = board[from[0]][from[1]];
                 if (isLegalMove(piece, from, to)) {
                     saveGameState();
-                    // Valid move found. Ignore any other "splash" squares.
                     String moveStr = executeMove(from, to, piece);
                     return MoveResult.valid(moveStr);
                 }
             }
         }
 
-        // CHECK EN PASSANT
         String epMove = findEnPassantMove(candidatesFrom, allChanges);
         if (epMove != null) return MoveResult.valid(epMove);
 
-        // --- END OF YOUR LOGIC ---
-
-        // --- DECISION: ILLEGAL vs NOISE ---
-        
-        // If 'candidatesFrom' is NOT empty, it means the player touched their own piece,
-        // but your logic above didn't find a valid move. This is an ILLEGAL move.
         if (!candidatesFrom.isEmpty()) {
             return MoveResult.illegal("Touched " + coordsToSquare(candidatesFrom.get(0)) + " but move was invalid.");
         }
 
-        // If no pieces were touched (candidatesFrom is empty), but changes happened,
-        // it's just shadow/noise.
         return MoveResult.noise();
     }
 
@@ -201,9 +243,6 @@ public class ChessGameTracker {
         history.push(new GameState(this.board, this.whiteToMove, this.isGameOver));
     }
 
-    /**
-     * Reverts the game to the previous state.
-     */
     public void undoLastMove() {
         if (history.isEmpty()) {
             System.out.println(">>> History empty. Cannot undo.");
@@ -212,7 +251,6 @@ public class ChessGameTracker {
 
         GameState previousState = history.pop();
         
-        // Restore State
         this.board = previousState.boardSnapshot;
         this.whiteToMove = previousState.wasWhiteTurn;
         this.isGameOver = previousState.wasGameOver;
@@ -223,12 +261,10 @@ public class ChessGameTracker {
     private String executeMove(int[] from, int[] to, int piece) {
         String promotion = "";
         
-        // Auto-promote to Queen for simplicity
         if (Math.abs(piece) == 1 && (to[0] == 0 || to[0] == 7)) {
             promotion = "Q";
         }
 
-        // Handle En Passant Target
         if (Math.abs(piece) == 1 && Math.abs(from[0] - to[0]) == 2) {
             int epRank = whiteToMove ? 2 : 5;
             lastEnPassantSquare = coordsToSquare(new int[]{epRank, from[1]});
@@ -242,14 +278,11 @@ public class ChessGameTracker {
 
         updateCastlingRights(piece, from);
         
-        // --- TURN FLIP ---
         whiteToMove = !whiteToMove;
         
-        // --- NEW: CHECKMATE DETECTION ---
-        // Check if the player who just received the turn (whiteToMove) is in Checkmate
         if (isCheckmate(whiteToMove)) {
             isGameOver = true;
-            String winner = whiteToMove ? "BLACK" : "WHITE"; // If White is mated, Black won
+            String winner = whiteToMove ? "BLACK" : "WHITE";
             System.out.println("\n#############################################");
             System.out.println("### CHECKMATE! " + winner + " won the game. ###");
             System.out.println("#############################################\n");
@@ -264,48 +297,32 @@ public class ChessGameTracker {
         return m;
     }
 
-    /**
-     * NEW: Check if the specified color is in Checkmate.
-     * Checkmate = King is in Check AND has NO legal moves to escape.
-     */
     private boolean isCheckmate(boolean colorToCheck) {
-        // 1. Is King in Check?
         if (!isKingInCheck(colorToCheck)) {
             return false;
         }
-
-        // 2. Can any piece move to remove the check?
-        // Brute force: Try ALL legal moves for this color. 
-        // If any move results in King NOT being in check, it's not mate.
         
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 int p = board[r][c];
-                // If piece belongs to the player in check
                 if (p != EMPTY && (colorToCheck ? p > 0 : p < 0)) {
                     int[] from = {r, c};
                     
-                    // Try moving to every square on the board
                     for (int tr = 0; tr < 8; tr++) {
                         for (int tc = 0; tc < 8; tc++) {
                             int[] to = {tr, tc};
                             
-                            // Check basic geometry legality (ignoring check for a moment)
                             if (canPieceMoveGeometry(p, from, to, board[tr][tc])) {
                                 
-                                // SIMULATE MOVE
                                 int[][] backupBoard = copyBoard(board);
-                                board[tr][tc] = p; // simplified (no promotion logic needed for escape check usually)
+                                board[tr][tc] = p;
                                 board[r][c] = EMPTY;
                                 
-                                // Did this fix the check?
                                 boolean stillInCheck = isKingInCheck(colorToCheck);
                                 
-                                // RESTORE BOARD
                                 restoreBoard(backupBoard);
                                 
                                 if (!stillInCheck) {
-                                    // Found an escape!
                                     return false; 
                                 }
                             }
@@ -315,18 +332,13 @@ public class ChessGameTracker {
             }
         }
         
-        // No escape found
         return true;
     }
 
-    /**
-     * NEW: Checks if the King of the given color is currently under attack.
-     */
     private boolean isKingInCheck(boolean whiteKing) {
         int[] kingPos = null;
         int kingVal = whiteKing ? W_KING : B_KING;
 
-        // Find King
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 if (board[r][c] == kingVal) {
@@ -336,15 +348,12 @@ public class ChessGameTracker {
             }
         }
         
-        if (kingPos == null) return false; // Should not happen
+        if (kingPos == null) return false;
 
-        // Check if any enemy piece attacks the King's square
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 int p = board[r][c];
-                // If it's an enemy piece
                 if (p != EMPTY && (whiteKing ? p < 0 : p > 0)) {
-                    // Can this enemy piece attack the king?
                     if (canPieceAttack(p, new int[]{r, c}, kingPos)) {
                         return true;
                     }
@@ -354,30 +363,20 @@ public class ChessGameTracker {
         return false;
     }
 
-    /**
-     * NEW: simplified move checker for attacks.
-     * Unlike isLegalMove, this doesn't check whose turn it is, just geometry.
-     */
     private boolean canPieceAttack(int piece, int[] from, int[] to) {
         int absPiece = Math.abs(piece);
         int rankDiff = to[0] - from[0];
         int fileDiff = to[1] - from[1];
         boolean isWhite = piece > 0;
 
-        if (absPiece == 1) { // Pawn (Special case for attacking)
+        if (absPiece == 1) {
             int dir = isWhite ? 1 : -1;
-            // Pawn only attacks diagonals
             return rankDiff == dir && Math.abs(fileDiff) == 1;
         }
 
-        // For all other pieces, attack logic is same as move logic (assuming target is enemy/king)
-        return canPieceMoveGeometry(piece, from, to, isWhite ? B_PAWN : W_PAWN); // Dummy target to simulate capture
+        return canPieceMoveGeometry(piece, from, to, isWhite ? B_PAWN : W_PAWN);
     }
 
-    /**
-     * NEW: Refactored geometry logic.
-     * Separated from isLegalMove so we can use it for checkmate simulation.
-     */
     private boolean canPieceMoveGeometry(int piece, int[] from, int[] to, int targetPiece) {
         int fromRank = from[0], fromFile = from[1];
         int toRank = to[0], toFile = to[1];
@@ -386,17 +385,13 @@ public class ChessGameTracker {
         int absPiece = Math.abs(piece);
         boolean isWhite = piece > 0;
 
-        // Standard rule: Cannot land on own piece
         if (targetPiece != EMPTY && (targetPiece > 0) == isWhite) return false;
 
         switch (absPiece) {
             case 1: // Pawn
                 int dir = isWhite ? 1 : -1;
-                // Push 1
                 if (fileDiff == 0 && rankDiff == dir && targetPiece == EMPTY) return true;
-                // Push 2
                 if (fileDiff == 0 && fromRank == (isWhite?1:6) && rankDiff == 2*dir && targetPiece == EMPTY && board[fromRank+dir][fromFile] == EMPTY) return true;
-                // Capture
                 if (Math.abs(fileDiff) == 1 && rankDiff == dir && targetPiece != EMPTY) return true;
                 return false;
             case 2: // Knight
@@ -413,14 +408,12 @@ public class ChessGameTracker {
         return false;
     }
     
-    // Helper to copy board for simulation
     private int[][] copyBoard(int[][] source) {
         int[][] newBoard = new int[8][8];
         for(int i=0; i<8; i++) System.arraycopy(source[i], 0, newBoard[i], 0, 8);
         return newBoard;
     }
     
-    // Helper to restore board
     private void restoreBoard(int[][] source) {
         for(int i=0; i<8; i++) System.arraycopy(source[i], 0, board[i], 0, 8);
     }
@@ -429,13 +422,10 @@ public class ChessGameTracker {
         int rank = whiteToMove ? 0 : 7;
         int kingPiece = whiteToMove ? W_KING : B_KING;
         
-        // Verify King is on start square
         if (board[rank][4] != kingPiece) return null;
 
-        // King start must be in changed squares
         if (!containsSquare(changes, rank, 4)) return null;
 
-        // Check Kingside (Target g-file: index 6)
         if (containsSquare(changes, rank, 6)) {
              if ((whiteToMove && !whiteKingMoved && !whiteRookH1Moved) || (!whiteToMove && !blackKingMoved && !blackRookH8Moved)) {
                  if (board[rank][5] == EMPTY && board[rank][6] == EMPTY) {
@@ -449,7 +439,6 @@ public class ChessGameTracker {
              }
         }
 
-        // Check Queenside (Target c-file: index 2)
         if (containsSquare(changes, rank, 2)) {
              if ((whiteToMove && !whiteKingMoved && !whiteRookA1Moved) || (!whiteToMove && !blackKingMoved && !blackRookA8Moved)) {
                  if (board[rank][1] == EMPTY && board[rank][2] == EMPTY && board[rank][3] == EMPTY) {
@@ -473,7 +462,6 @@ public class ChessGameTracker {
             int piece = board[from[0]][from[1]];
             if (Math.abs(piece) != 1) continue;
 
-            // Geometry check
             if (Math.abs(epCoords[1] - from[1]) == 1 && Math.abs(epCoords[0] - from[0]) == 1) {
                 if (containsSquare(changes, epCoords[0], epCoords[1])) {
                     int capRank = whiteToMove ? 4 : 3;
@@ -490,7 +478,6 @@ public class ChessGameTracker {
     }
 
     private boolean isLegalMove(int piece, int[] from, int[] to) {
-        // Wrapper for canPieceMoveGeometry that enforces turn color
         boolean isWhite = piece > 0;
         if (whiteToMove != isWhite) return false;
         
@@ -518,13 +505,27 @@ public class ChessGameTracker {
     private void updateCastlingRights(int piece, int[] from) {
         if (piece == W_KING) whiteKingMoved = true;
         if (piece == B_KING) blackKingMoved = true;
-        if (piece == W_ROOK) {
-            if (from[0] == 0 && from[1] == 0) whiteRookA1Moved = true;
-            if (from[0] == 0 && from[1] == 7) whiteRookH1Moved = true;
-        }
-        if (piece == B_ROOK) {
-            if (from[0] == 7 && from[1] == 0) blackRookA8Moved = true;
-            if (from[0] == 7 && from[1] == 7) blackRookH8Moved = true;
+        
+        if (!blackPOV) {
+            // White POV: Standard positions
+            if (piece == W_ROOK) {
+                if (from[0] == 0 && from[1] == 0) whiteRookA1Moved = true;
+                if (from[0] == 0 && from[1] == 7) whiteRookH1Moved = true;
+            }
+            if (piece == B_ROOK) {
+                if (from[0] == 7 && from[1] == 0) blackRookA8Moved = true;
+                if (from[0] == 7 && from[1] == 7) blackRookH8Moved = true;
+            }
+        } else {
+            // Black POV: Mirrored positions
+            if (piece == W_ROOK) {
+                if (from[0] == 7 && from[1] == 7) whiteRookA1Moved = true;
+                if (from[0] == 7 && from[1] == 0) whiteRookH1Moved = true;
+            }
+            if (piece == B_ROOK) {
+                if (from[0] == 0 && from[1] == 7) blackRookA8Moved = true;
+                if (from[0] == 0 && from[1] == 0) blackRookH8Moved = true;
+            }
         }
     }
 
@@ -574,20 +575,6 @@ public class ChessGameTracker {
         return piece > 0 ? Character.toUpperCase(c) : c;
     }
 
-    // Handles Uppercase (F4) and Lowercase (f4) to prevent crashes
-    private int[] squareToCoords(String square) {
-        String lower = square.toLowerCase();
-        int file = lower.charAt(0) - 'a';
-        int rank = lower.charAt(1) - '1';
-        return new int[]{rank, file};
-    }
-
-    private String coordsToSquare(int[] coords) {
-        char file = (char) ('a' + coords[1]);
-        char rank = (char) ('1' + coords[0]);
-        return "" + file + rank;
-    }
-
     public void printBoard() {
         System.out.println("\n  a b c d e f g h");
         System.out.println("  ---------------");
@@ -618,5 +605,9 @@ public class ChessGameTracker {
             System.arraycopy(board[i], 0, copy[i], 0, 8);
         }
         return copy;
+    }
+    
+    public boolean isBlackPOV() {
+        return blackPOV;
     }
 }
