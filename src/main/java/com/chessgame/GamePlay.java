@@ -83,7 +83,7 @@ public class GamePlay extends Application {
             chessBoardUI.setPerspective(!current);
             // Force an immediate redraw using the tracker's current internal board
             chessBoardUI.updateBoard(tracker.getBoardArray());             
-            computerIsBlack = !computerIsBlack
+            computerIsBlack = !computerIsBlack;
             tracker = new ChessGameTracker(computerIsBlack);
         });
 
