@@ -152,6 +152,72 @@ public class ChessMoveLogic {
         return changes;
     }
 
+    public static Mat getSquareForModel(Mat warpedBoard, int logicalRank, int logicalFile) {
+        // 1. Convert Logical Rank (0=White side) to Visual Row (0=Top)
+        int row = 7 - logicalRank; 
+        int col = logicalFile;
+
+        // 2. Geometry Constants (Must match your training extraction exactly)
+        int warpedWidth = warpedBoard.width(); 
+        int skyBuffer = (int)(warpedWidth * 0.5); 
+        
+        double outerSize = BoardDetector.OUTER_BOARD_SIZE_CM;
+        double innerSize = BoardDetector.INNER_BOARD_SIZE_CM;
+        double borderRatio = BoardDetector.BORDER_WIDTH_CM / outerSize;
+        
+        double innerStartPixel = warpedWidth * borderRatio;
+        double innerSizePixel = warpedWidth * (innerSize / outerSize);
+        double squareSize = innerSizePixel / 8.0;
+
+        // 3. Sky Buffer Adjustments
+        double baseX = innerStartPixel + (col * squareSize);
+        double baseY = skyBuffer + innerStartPixel + (row * squareSize); 
+
+        double baseExtraHeightRatio = 0.85;  
+        double extraWidthRatio = 0.3;       
+        int extraWidthPerSide = (int)(squareSize * extraWidthRatio / 2.0);
+
+        double rowAdjustment;
+        if (row == 0) rowAdjustment = baseExtraHeightRatio + 0.3; 
+        else if (row < 2) rowAdjustment = baseExtraHeightRatio + 0.2;
+        else if(row < 4) rowAdjustment = baseExtraHeightRatio;
+        else if(row < 6) rowAdjustment = baseExtraHeightRatio - 0.2;
+        else rowAdjustment = baseExtraHeightRatio - 0.3;
+
+        int extraHeight = (int)(squareSize * rowAdjustment);
+
+        // 4. Calculate Crop
+        int extendedX = (int)Math.max(0, baseX - extraWidthPerSide);
+        int extendedY = (int)Math.max(0, baseY - extraHeight);
+        int extendedWidth = (int)squareSize + (2 * extraWidthPerSide);
+        int extendedHeight = (int)squareSize + extraHeight;
+        
+        if (extendedX + extendedWidth > warpedBoard.width()) extendedWidth = warpedBoard.width() - extendedX;
+        if (extendedY + extendedHeight > warpedBoard.height()) extendedHeight = warpedBoard.height() - extendedY;
+
+        return new Mat(warpedBoard, new Rect(extendedX, extendedY, extendedWidth, extendedHeight)).clone();
+    }
+
+    /**
+     * Prepares an OpenCV Matrix for the DeepLearning4J model.
+     */
+    public static float[] preprocessImageForModel(Mat src) {
+        // Resize to model input (Assuming 224x224 based on standard transfer learning)
+        Mat resized = new Mat();
+        Imgproc.resize(src, resized, new Size(224, 224));
+
+        int channels = 3;
+        float[] data = new float[224 * 224 * channels];
+        byte[] byteData = new byte[(int) (resized.total() * resized.channels())];
+        resized.get(0, 0, byteData);
+
+        for (int i = 0; i < byteData.length; i++) {
+            data[i] = (byteData[i] & 0xFF) / 255.0f; // Normalize 0-1
+        }
+        return data;
+    }
+
+
     private static String getNotation(int row, int col) {
         char file = (char) ('a' + col);
         int rank = 8 - row;

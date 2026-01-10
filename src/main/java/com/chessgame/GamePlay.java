@@ -34,18 +34,43 @@ public class GamePlay extends Application {
     private Label statusLabel;
     private HttpHandDetector handDetector;
 
+    // returns of model
+    private final String[] MODEL_CLASSES = {
+        "black_bishop",       // 0
+        "black_king",         // 1
+        "black_knight",       // 2
+        "black_pawn",         // 3
+        "black_queen",        // 4
+        "black_rook",         // 5
+        "empty",              // 6
+        "half_empty_square",  // 7
+        "white_bishop",       // 8
+        "white_king",         // 9
+        "white_knight",       // 10
+        "white_pawn",         // 11
+        "white_queen",        // 12
+        "white_rook"          // 13
+    };
+
     // Game State Variables
     private Point[] boardCorners;
     private Mat prevWarpedImage;
     private ScheduledExecutorService gameLoopExecutor;
     private boolean isTracking = false;
     private boolean computerIsBlack = false;
+    private String modelPath = "models/detection_model.h5";
+    private ChessModelLoader loader = null;
     @Override
     public void start(Stage stage) {
         // Initialize Core Logic
         tracker = new ChessGameTracker(computerIsBlack);
         chessBoardUI = new ChessBoard();
-
+        loader = new ChessModelLoader();
+        try {
+            loader.loadModel(modelPath);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         // Initialize UI Components
         cameraViewer = new CameraViewer();
         cameraViewer.startCamera();
@@ -215,6 +240,31 @@ public class GamePlay extends Application {
                         case VALID:
                             // --- VALID MOVE ---
                             log(">>> MOVE PLAYED: " + result.moveNotation);
+
+                            // [START] AI PROMOTION CHECK
+                            if (result.moveNotation.contains("Q") || result.moveNotation.endsWith("Q")) {
+                                
+                                // 1. Parse location from notation (e.g., "a7a8Q" -> destination "a8")
+                                String destStr = result.moveNotation.substring(2, 4); 
+                                int destCol = destStr.charAt(0) - 'a';
+                                int destRow = destStr.charAt(1) - '1';
+
+                                // 2. Extract the image of the specific square
+                                Mat pieceImg = ChessMoveLogic.getSquareForModel(currentWarped, destRow, destCol);
+
+                                // 3. Ask the AI Model (Using your helper method now!)
+                                String detected = classifyPiece(pieceImg); 
+
+                                // 4. Correct the Tracker if needed
+                                if (!detected.equals("Q")) {
+                                    log("AI CORRECTION: Promotion was actually " + detected);
+                                    tracker.overridePromotion(destRow, destCol, detected);
+                                    
+                                    // Update notation for log so the UI shows "a7a8N" instead of Q
+                                    result.moveNotation = result.moveNotation.replace("Q", detected);
+                                }
+                            }
+                            // [END] AI PROMOTION CHECK
                             tracker.printBoard(); // Update console
                             chessBoardUI.updateBoard(tracker.getBoardArray());
                             
@@ -321,6 +371,44 @@ public class GamePlay extends Application {
         alert.setTitle(title);
         alert.setContentText(content);
         alert.showAndWait();
+    }
+
+    private String classifyPiece(Mat squareImage) {
+        if (loader == null) return "Q"; 
+
+        try {
+            // 1. Preprocess using the logic (224x224, /255.0)
+            float[] inputData = ChessMoveLogic.preprocessImageForModel(squareImage);
+
+            // 2. Predict
+            int index = loader.predict(inputData, 224, 224, 3);
+            
+            // 3. Map the index to the Class Name
+            if (index < 0 || index >= MODEL_CLASSES.length) {
+                System.err.println("Model predicted invalid index: " + index);
+                return "Q";
+            }
+
+            String fullLabel = MODEL_CLASSES[index];
+            System.out.println("AI sees: " + fullLabel + " (Index " + index + ")");
+
+            return mapLabelToNotation(fullLabel);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Q"; 
+        }
+    }
+
+    private String mapLabelToNotation(String label) {
+        if (label.contains("queen"))  return "Q";
+        if (label.contains("rook"))   return "R";
+        if (label.contains("bishop")) return "B";
+        if (label.contains("knight")) return "N";
+        
+        // If it sees Pawn, Empty, or Half-Empty on a promotion square, 
+        // it's likely confused. Fallback to Queen.
+        return "Q"; 
     }
 
     private void log(String msg) {

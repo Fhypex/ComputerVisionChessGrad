@@ -331,6 +331,30 @@ public class ChessGameTracker {
         return m;
     }
 
+    public void overridePromotion(int row, int col, String pieceNotation) {
+        int pieceCode = 0;
+        
+        // Map notation to base integer code
+        switch (pieceNotation) {
+            case "Q": pieceCode = 5; break;
+            case "R": pieceCode = 4; break;
+            case "B": pieceCode = 3; break;
+            case "N": pieceCode = 2; break;
+            default: return; // Invalid input, do nothing
+        }
+
+        // Determine color based on the row (Promotions only happen on rank 0 or 7)
+        // If row is 7, White pawn moved there (so it's White).
+        // If row is 0, Black pawn moved there (so it's Black).
+        if (row == 7) {
+            board[row][col] = pieceCode; // White is positive
+        } else if (row == 0) {
+            board[row][col] = -pieceCode; // Black is negative
+        }
+        
+        System.out.println("Tracker Override: Set [" + row + "," + col + "] to " + pieceNotation);
+    }
+
     private boolean isStalemate(boolean colorToCheck) {
         if (isKingInCheck(colorToCheck)) return false;
         return !hasLegalMoves(colorToCheck);
