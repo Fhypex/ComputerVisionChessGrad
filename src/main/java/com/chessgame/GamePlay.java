@@ -6,17 +6,14 @@ import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
-import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
-import org.opencv.imgcodecs.Imgcodecs;
 
 import com.chessgame.ChessGameTracker.MoveResult;
 
@@ -32,6 +29,7 @@ public class GamePlay extends Application {
     private ChessBoard chessBoardUI; // Your UI visualization of the board
     private TextArea logArea;
     private Label statusLabel;
+    private Label aiSuggestionLabel; // NEW: UI for Stockfish moves
     private HttpHandDetector handDetector;
 
     // returns of model
@@ -60,6 +58,10 @@ public class GamePlay extends Application {
     private boolean computerIsBlack = false;
     private String modelPath = "models/detection_model.h5";
     private ChessModelLoader loader = null;
+    
+    // NEW: Prevents spamming the API during the same turn
+    private boolean isThinking = false; 
+
     @Override
     public void start(Stage stage) {
         // Initialize Core Logic
@@ -88,6 +90,11 @@ public class GamePlay extends Application {
         statusLabel = new Label("Status: IDLE");
         statusLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
 
+        // --- NEW: AI Advice Label ---
+        aiSuggestionLabel = new Label("AI Advice: Waiting...");
+        aiSuggestionLabel.setStyle("-fx-text-fill: #00BFFF; -fx-font-weight: bold; -fx-font-size: 14px; -fx-border-color: #00BFFF; -fx-padding: 5;");
+        // ----------------------------
+
         // --- Buttons ---
         Button btnStartGame = new Button("START REALTIME GAME");
         btnStartGame.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
@@ -107,13 +114,13 @@ public class GamePlay extends Application {
             boolean current = chessBoardUI.isWhitePerspective();
             chessBoardUI.setPerspective(!current);
             // Force an immediate redraw using the tracker's current internal board
-            chessBoardUI.updateBoard(tracker.getBoardArray());             
+            chessBoardUI.updateBoard(tracker.getBoardArray());            
             computerIsBlack = !computerIsBlack;
             tracker = new ChessGameTracker(computerIsBlack);
         });
 
-    // Add btnFlip to your controlBox HBox
-        HBox controlBox = new HBox(15, btnStartGame, btnStopGame, btnFlip, btnUndo , statusLabel);
+        // Add aiSuggestionLabel to your controlBox HBox
+        HBox controlBox = new HBox(15, btnStartGame, btnStopGame, btnFlip, btnUndo , statusLabel, aiSuggestionLabel);
         // Layouts
         controlBox.setPadding(new Insets(10));
         controlBox.setStyle("-fx-background-color: #333; -fx-alignment: center-left;");
@@ -141,8 +148,6 @@ public class GamePlay extends Application {
 
     /**
      * PHASE 1: CALIBRATION
-     * Detects board, confirms with user, and saves initial state.
-     * Runs in a separate thread to avoid freezing UI during manual picking.
      */
     private void startCalibrationSequence() {
         if (isTracking) return;
@@ -162,7 +167,6 @@ public class GamePlay extends Application {
             Point[] detected = BoardDetector.findBoardCorners(frame, frame.clone());
 
             // 3. User Confirmation / Manual Adjustment (Blocking Call)
-            // This opens the JavaFX window defined in BoardDetector
             Point[] finalCorners = BoardDetector.pickCornersManually(frame, detected);
 
             if (finalCorners == null) {
@@ -187,7 +191,6 @@ public class GamePlay extends Application {
 
     /**
      * PHASE 2: THE GAME LOOP
-     * Checks every 1 second for changes.
      */
     private void startGameLoop() {
         isTracking = true;
@@ -204,104 +207,87 @@ public class GamePlay extends Application {
                 Mat currentFrame = cameraViewer.captureCurrentFrame();
                 if (currentFrame == null || currentFrame.empty()) return;
 
-                // 1.5 Check for hand presence (skip processing if hand detected)
+                // 1.5 Check for hand presence
                 try {
                     boolean hand = handDetector != null && handDetector.isHandPresent(currentFrame, 0.5);
                     if (hand) {
-                        Platform.runLater(() -> log("Hand detected in frame — skipping processing."));
-                        // Do not update prevWarpedImage; wait until user removes hand
+                        Platform.runLater(() -> log("Hand detected — skipping."));
                         return;
                     }
                 } catch (Exception e) {
-                    // If detection fails, continue normal processing (fail open)
                     System.err.println("Hand detection failed: " + e.getMessage());
                 }
-                // 2. Warp (Using fixed corners)
+                
+                // 2. Warp 
                 Mat currentWarped = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
 
                 // 3. Detect Changes
                 List<String> changedSquares = ChessMoveLogic.detectSquareChanges(prevWarpedImage, currentWarped);
-                System.out.println(changedSquares);
-                // If visual changes detected, try to process logic
+                
+                // If visual changes detected, process logic
                 if (!changedSquares.isEmpty()) {
                     System.out.println(changedSquares);
-                    Platform.runLater(() -> log("Visual change detected: " + changedSquares));
+                    Platform.runLater(() -> log("Visual change: " + changedSquares));
 
                     // 4. Process Move Logic
                     MoveResult result = tracker.processChangedSquares(changedSquares);
                     System.out.println(result.toString());
+                    
                     Platform.runLater(() -> {
                     switch (result.type) {
                         case NONE:
-                            // --- NOTHING CHANGED ---
-                            // The board is static. We do nothing.
                             break;
 
                         case VALID:
-                            // --- VALID MOVE ---
                             log(">>> MOVE PLAYED: " + result.moveNotation);
 
                             // [START] AI PROMOTION CHECK
                             if (result.moveNotation.contains("Q") || result.moveNotation.endsWith("Q")) {
-                                
-                                // 1. Parse location from notation (e.g., "a7a8Q" -> destination "a8")
                                 String destStr = result.moveNotation.substring(2, 4); 
                                 int destCol = destStr.charAt(0) - 'a';
                                 int destRow = destStr.charAt(1) - '1';
-
-                                // 2. Extract the image of the specific square
                                 Mat pieceImg = ChessMoveLogic.getSquareForModel(currentWarped, destRow, destCol);
-
-                                // 3. Ask the AI Model (Using your helper method now!)
                                 String detected = classifyPiece(pieceImg); 
 
-                                // 4. Correct the Tracker if needed
                                 if (!detected.equals("Q")) {
-                                    log("AI CORRECTION: Promotion was actually " + detected);
+                                    log("AI CORRECTION: Promotion was " + detected);
                                     tracker.overridePromotion(destRow, destCol, detected);
-                                    
-                                    // Update notation for log so the UI shows "a7a8N" instead of Q
                                     result.moveNotation = result.moveNotation.replace("Q", detected);
                                 }
                             }
                             // [END] AI PROMOTION CHECK
-                            tracker.printBoard(); // Update console
+                            
+                            tracker.printBoard(); 
                             chessBoardUI.updateBoard(tracker.getBoardArray());
                             
-                            // Visual feedback (Optional, if you have this method)
-                            // chessBoardUI.executeMove(result.moveNotation); 
-
                             // Check for Mate
                             if (result.moveNotation.endsWith("#")) {
                                 showInfo("Game Over", "Checkmate detected!");
                                 stopGameLoop();
                             }
 
-                            // CRITICAL: Lock in the new board state
+                            // Lock in the new board state
                             prevWarpedImage = currentWarped; 
+
+                            // --- NEW: Trigger Stockfish API ---
+                            checkAndTriggerStockfish();
+                            // ----------------------------------
                             break;
 
                         case ILLEGAL:
-                            // --- ILLEGAL MOVE ---
-                            // User touched a piece but placed it invalidly
                             log("!!! ILLEGAL MOVE: " + result.details);
                             showIllegalMoveAlert(result.details);
-                            
-                            // IMPORTANT: We do NOT update prevWarpedImage. 
-                            // The system expects the user to undo the bad move on the physical board.
                             break;
 
                         case NOISE:
-                            // --- VISUAL NOISE ---
-                            // Hand hovering, shadows, but no clear piece movement detected.
-                            // We only log this if there were actual visual changes, to avoid spam.
-                            if (!changedSquares.isEmpty()) {
-                                log("... (Ignored visual noise/shadows) ...");
-                            }
-                            // We do NOT update prevWarpedImage.
+                            if (!changedSquares.isEmpty()) log("... (Ignored noise) ...");
                             break;
                     }
                 });
+                } else {
+                    // Even if no visual change, we might want to check if it's our turn 
+                    // and we haven't asked AI yet (e.g. after game load)
+                    Platform.runLater(this::checkAndTriggerStockfish);
                 }
 
             } catch (Exception e) {
@@ -309,6 +295,82 @@ public class GamePlay extends Application {
                 Platform.runLater(() -> log("Error in Game Loop: " + e.getMessage()));
             }
         }, 4000, 4000, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * NEW: Logic to check whose turn it is and ask Stockfish
+     */
+    private void checkAndTriggerStockfish() {
+        if (tracker == null || !isTracking) return;
+
+        // Parse FEN to determine turn: " ... w ..." means White
+        boolean isWhiteTurn = tracker.getFEN().contains(" w ");
+        
+        // Computer moves if: 
+        // 1. Computer is Black AND it is NOT White's turn
+        // 2. Computer is White AND it IS White's turn
+        boolean isComputerTurn = (computerIsBlack && !isWhiteTurn) || (!computerIsBlack && isWhiteTurn);
+
+        if (isComputerTurn && !isThinking) {
+            isThinking = true;
+            aiSuggestionLabel.setText("AI Advice: Thinking...");
+            
+            // Default depth 12
+            StockfishClient.getBestMove(tracker.getFEN(), 12, new StockfishClient.StockfishCallback() {
+                @Override
+                public void onMoveReceived(String bestMove, String evaluation) {
+                    isThinking = false;
+                    
+                    Platform.runLater(() -> {
+                        String friendlyMove = formatMoveForSpeech(bestMove);
+                        
+                        aiSuggestionLabel.setText("AI Recommends: " + friendlyMove + " (Eval: " + evaluation + ")");
+                        log(">>> STOCKFISH: " + bestMove + " | Eval: " + evaluation);
+                        
+                        // Speak the move
+                        speakMove(friendlyMove);
+                    });
+                }
+
+                @Override
+                public void onError(String error) {
+                    isThinking = false;
+                    Platform.runLater(() -> log("Stockfish Error: " + error));
+                }
+            });
+        }
+    }
+
+    /**
+     * NEW: Voice Command Implementation
+     * Uses native OS TTS tools (PowerShell for Windows, 'say' for Mac)
+     */
+    private void speakMove(String text) {
+        String os = System.getProperty("os.name").toLowerCase();
+        
+        // Add spaces for clearer pronunciation (e.g., "e 2 to e 4")
+        String spokenText = text.replaceAll("([a-h])([1-8])", "$1 $2");
+
+        new Thread(() -> {
+            try {
+                if (os.contains("win")) {
+                    String cmd = "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('" + spokenText + "');";
+                    new ProcessBuilder("powershell.exe", "-Command", cmd).start();
+                } else if (os.contains("mac")) {
+                    new ProcessBuilder("say", spokenText).start();
+                } else if (os.contains("nix") || os.contains("nux")) {
+                    new ProcessBuilder("espeak", spokenText).start();
+                }
+            } catch (Exception e) {
+                System.err.println("TTS Failed: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private String formatMoveForSpeech(String move) {
+        if (move == null || move.length() < 4) return move;
+        // e2e4 -> e2 to e4
+        return move.substring(0, 2) + " to " + move.substring(2, 4);
     }
 
     private void stopGameLoop() {
@@ -329,10 +391,6 @@ public class GamePlay extends Application {
         alert.setTitle("Illegal Move Detected");
         alert.setHeaderText("The detected move is invalid.");
         alert.setContentText("Logic could not validate changes on: " + details + "\n\nPlease fix the board state and click OK to resume.");
-        
-        // This blocks the JavaFX thread, effectively pausing visual updates, 
-        // but the background thread might keep running. 
-        // We pause tracking flag briefly or just let the user fix it.
         alert.showAndWait();
     }
 
@@ -341,15 +399,16 @@ public class GamePlay extends Application {
 
         log(">>> Undoing last move...");
 
-        // 1. Revert internal game logic (You need to ensure this method exists in ChessGameTracker)
+        // 1. Revert internal game logic 
         tracker.undoLastMove(); 
+        
+        // Reset thinking state in case AI was thinking during undo
+        isThinking = false; 
 
         // 2. Update UI to match the reverted internal state
         chessBoardUI.updateBoard(tracker.getBoardArray());
 
         // 3. Reset Visual Tracking Base
-        // We assume the user has physically corrected the board before clicking Undo.
-        // We capture the CURRENT frame as the new "safe" baseline.
         if (isTracking && cameraViewer != null) {
              Mat currentFrame = cameraViewer.captureCurrentFrame();
              if (currentFrame != null && !currentFrame.empty() && boardCorners != null) {
@@ -357,6 +416,9 @@ public class GamePlay extends Application {
                  log("Visual tracker reset to current board state.");
              }
         }
+        
+        // Check if we need to trigger AI (if undo made it computer's turn)
+        checkAndTriggerStockfish();
     }
 
     private void showError(String title, String content) {
@@ -405,9 +467,6 @@ public class GamePlay extends Application {
         if (label.contains("rook"))   return "R";
         if (label.contains("bishop")) return "B";
         if (label.contains("knight")) return "N";
-        
-        // If it sees Pawn, Empty, or Half-Empty on a promotion square, 
-        // it's likely confused. Fallback to Queen.
         return "Q"; 
     }
 

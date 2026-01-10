@@ -100,6 +100,11 @@ public class ChessGameTracker {
         lastEnPassantSquare = "-";
     }
 
+    // Add inside ChessGameTracker class
+    public boolean isWhiteTurn() {
+        return this.whiteToMove;
+    }
+
     /**
      * Converts camera square notation to logical chess coordinates
      * considering the POV (perspective)
