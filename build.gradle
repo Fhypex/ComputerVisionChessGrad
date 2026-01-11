@@ -61,6 +61,7 @@ tasks.register('runtimePipeline', JavaExec) {
 
 
 dependencies {
+    implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
     implementation 'org.openpnp:opencv:4.9.0-0'
     implementation 'org.deeplearning4j:deeplearning4j-core:1.0.0-M2.1'

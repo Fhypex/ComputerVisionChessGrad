@@ -31,7 +31,7 @@ public class PieceClassifier {
     private void loadTemplates(String templateDir) {
         File dir = new File(templateDir);
         if (!dir.exists()) {
-            System.out.println("❌ Template directory not found: " + templateDir);
+            System.out.println("Template directory not found: " + templateDir);
             return;
         }
 
@@ -43,7 +43,7 @@ public class PieceClassifier {
             templates.add(new Template(label, f.getAbsolutePath()));
         }
 
-        System.out.println("✅ Loaded " + templates.size() + " templates from " + templateDir);
+        System.out.println("Loaded " + templates.size() + " templates from " + templateDir);
     }
 
     /**
@@ -52,7 +52,7 @@ public class PieceClassifier {
      */
     public String classifyCell(Mat cell) {
         if (templates.isEmpty()) {
-            System.out.println("⚠️ No templates loaded!");
+            System.out.println("No templates loaded!");
             return "empty";
         }
 
@@ -83,11 +83,11 @@ public class PieceClassifier {
      */
     public void classifyBoard(List<Mat> cells) {
         if (cells == null || cells.isEmpty()) {
-            System.out.println("❌ No board cells found!");
+            System.out.println("No board cells found!");
             return;
         }
 
-        System.out.println("♟️ Classifying 64 board squares...");
+        System.out.println("Classifying 64 board squares...");
 
         for (int row = 0; row < 8; row++) {
             StringBuilder line = new StringBuilder();

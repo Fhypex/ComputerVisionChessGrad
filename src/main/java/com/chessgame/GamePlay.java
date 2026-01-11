@@ -247,6 +247,7 @@ public class GamePlay extends Application {
                                 int destCol = destStr.charAt(0) - 'a';
                                 int destRow = destStr.charAt(1) - '1';
                                 Mat pieceImg = ChessMoveLogic.getSquareForModel(currentWarped, destRow, destCol);
+                                System.out.println("Goingto classifier");
                                 String detected = classifyPiece(pieceImg); 
 
                                 if (!detected.equals("Q")) {
@@ -294,7 +295,7 @@ public class GamePlay extends Application {
                 e.printStackTrace();
                 Platform.runLater(() -> log("Error in Game Loop: " + e.getMessage()));
             }
-        }, 4000, 4000, TimeUnit.MILLISECONDS);
+        }, 2000, 2000, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -441,7 +442,7 @@ public class GamePlay extends Application {
         try {
             // 1. Preprocess using the logic (224x224, /255.0)
             float[] inputData = ChessMoveLogic.preprocessImageForModel(squareImage);
-
+            System.out.println("preprocessing happened.");
             // 2. Predict
             int index = loader.predict(inputData, 224, 224, 3);
             
@@ -449,7 +450,7 @@ public class GamePlay extends Application {
             if (index < 0 || index >= MODEL_CLASSES.length) {
                 System.err.println("Model predicted invalid index: " + index);
                 return "Q";
-            }
+            }            
 
             String fullLabel = MODEL_CLASSES[index];
             System.out.println("AI sees: " + fullLabel + " (Index " + index + ")");

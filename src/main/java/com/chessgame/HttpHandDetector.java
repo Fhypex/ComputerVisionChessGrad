@@ -70,6 +70,10 @@ public class HttpHandDetector {
                     // ignore and treat as no-hand
                 }
             }
+
+            if(resp.statusCode() == 500) {
+                return true;
+            }
         } catch (Exception e) {
             System.err.println("HandDetector error: " + e.getMessage());
         }

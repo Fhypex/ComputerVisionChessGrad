@@ -35,7 +35,7 @@ public class ChessMoveLogic {
     }
 
     /**
-     * NEW: Detects changes between two already-warped board images.
+     * Detects changes between two already-warped board images.
      */
     public static List<String> detectSquareChanges(Mat warpedBefore, Mat warpedAfter) {
         List<String> changes = new ArrayList<>();
@@ -95,9 +95,9 @@ public class ChessMoveLogic {
                 Mat edgesBefore = new Mat();
                 Mat edgesAfter = new Mat();
 
-                // Thresholds 30/100 are standard for detecting piece outlines without picking up wood grain too much
-                Imgproc.Canny(grayBefore, edgesBefore, 30, 100);
-                Imgproc.Canny(grayAfter, edgesAfter, 30, 100);
+                // Thresholds 40/100 are standard for detecting piece outlines without picking up wood grain too much
+                Imgproc.Canny(grayBefore, edgesBefore, 40, 100);
+                Imgproc.Canny(grayAfter, edgesAfter, 40, 100);
 
                 Mat diffEdges = new Mat();
                 Core.absdiff(edgesBefore, edgesAfter, diffEdges);
@@ -110,9 +110,17 @@ public class ChessMoveLogic {
                 // 2. BUT, Structure (Edges) must ALSO change.
                 // A shadow will cause high Intensity Score (~30-50) but very low Edge Score (~0-1).
                 // A moved piece will cause high Intensity Score AND high Edge Score.
-
-                double INTENSITY_THRESH = 15.0; // Was 15.0
-                double EDGE_THRESH = 2.0;       // Requires ~3% of pixels to be different edges
+                double INTENSITY_THRESH;
+                double EDGE_THRESH; 
+                // eğer ki row + col çift ise denk gelen kare siyah, siyah üzerine oynanan hamlelerde intensity farkı daha fazla
+                if((row + col) % 2 == 0) {
+                    INTENSITY_THRESH = 28.0;
+                    EDGE_THRESH = 6.0;
+                } else {
+                    // beyazlarda daha az fark mevcut
+                    INTENSITY_THRESH = 22.0;
+                    EDGE_THRESH = 5.0;
+                }                  
 
                 boolean isChanged = false;
 
