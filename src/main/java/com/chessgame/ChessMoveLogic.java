@@ -5,7 +5,11 @@ import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class ChessMoveLogic {
 
@@ -38,129 +42,156 @@ public class ChessMoveLogic {
      * Detects changes between two already-warped board images.
      */
     public static List<String> detectSquareChanges(Mat warpedBefore, Mat warpedAfter) {
-        List<String> changes = new ArrayList<>();
+    List<String> changes = new ArrayList<>();
+    // NEW: Map to store change scores for parallax filtering
+    Map<String, Double> scoreMap = new HashMap<>();
 
-        // Geometry calculation
-        double outerSize = BoardDetector.OUTER_BOARD_SIZE_CM;
-        double innerSize = BoardDetector.INNER_BOARD_SIZE_CM;
-        double borderRatio = BoardDetector.BORDER_WIDTH_CM / outerSize;
+    // Geometry calculation
+    double outerSize = BoardDetector.OUTER_BOARD_SIZE_CM;
+    double innerSize = BoardDetector.INNER_BOARD_SIZE_CM;
+    double borderRatio = BoardDetector.BORDER_WIDTH_CM / outerSize;
 
-        double innerStartPixel = BoardDetector.VIRTUAL_RESOLUTION * borderRatio;
-        double innerSizePixel = BoardDetector.VIRTUAL_RESOLUTION * (innerSize / outerSize);
-        double squareSize = innerSizePixel / 8.0;
+    double innerStartPixel = BoardDetector.VIRTUAL_RESOLUTION * borderRatio;
+    double innerSizePixel = BoardDetector.VIRTUAL_RESOLUTION * (innerSize / outerSize);
+    double squareSize = innerSizePixel / 8.0;
 
-        int skyBuffer = (int)(BoardDetector.VIRTUAL_RESOLUTION * 0.5);
+    int skyBuffer = (int)(BoardDetector.VIRTUAL_RESOLUTION * 0.5);
 
-        Mat diffViz = warpedAfter.clone();
+    Mat diffViz = warpedAfter.clone();
 
-        for (int row = 0; row < 8; row++) {
-            for (int col = 0; col < 8; col++) {
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
 
-                double baseX = innerStartPixel + (col * squareSize);
-                double baseY = skyBuffer + innerStartPixel + (row * squareSize);
+            double baseX = innerStartPixel + (col * squareSize);
+            double baseY = skyBuffer + innerStartPixel + (row * squareSize);
 
-                // Inset slightly to focus on the center of the square
-                int inset = 5;
-                Rect strictRect = new Rect(
-                        (int)baseX + inset,
-                        (int)baseY + inset,
-                        (int)squareSize - (2 * inset),
-                        (int)squareSize - (2 * inset)
-                );
+            int inset = 5;
+            Rect strictRect = new Rect(
+                    (int)baseX + inset,
+                    (int)baseY + inset,
+                    (int)squareSize - (2 * inset),
+                    (int)squareSize - (2 * inset)
+            );
 
-                // Safety check
-                if (strictRect.x < 0 || strictRect.y < 0 ||
-                        strictRect.x + strictRect.width > warpedBefore.width() ||
-                        strictRect.y + strictRect.height > warpedBefore.height()) continue;
+            if (strictRect.x < 0 || strictRect.y < 0 ||
+                    strictRect.x + strictRect.width > warpedBefore.width() ||
+                    strictRect.y + strictRect.height > warpedBefore.height()) continue;
 
-                Mat roiBefore = new Mat(warpedBefore, strictRect);
-                Mat roiAfter = new Mat(warpedAfter, strictRect);
+            Mat roiBefore = new Mat(warpedBefore, strictRect);
+            Mat roiAfter = new Mat(warpedAfter, strictRect);
 
-                // --- STEP 1: Intensity Difference (The original check) ---
-                Mat grayBefore = new Mat();
-                Mat grayAfter = new Mat();
-                Imgproc.cvtColor(roiBefore, grayBefore, Imgproc.COLOR_BGR2GRAY);
-                Imgproc.cvtColor(roiAfter, grayAfter, Imgproc.COLOR_BGR2GRAY);
+            // --- STEP 1: Intensity ---
+            Mat grayBefore = new Mat();
+            Mat grayAfter = new Mat();
+            Imgproc.cvtColor(roiBefore, grayBefore, Imgproc.COLOR_BGR2GRAY);
+            Imgproc.cvtColor(roiAfter, grayAfter, Imgproc.COLOR_BGR2GRAY);
 
-                // Blur to remove camera noise (crucial for Canny stability)
-                Imgproc.GaussianBlur(grayBefore, grayBefore, new Size(5, 5), 0);
-                Imgproc.GaussianBlur(grayAfter, grayAfter, new Size(5, 5), 0);
+            Imgproc.GaussianBlur(grayBefore, grayBefore, new Size(5, 5), 0);
+            Imgproc.GaussianBlur(grayAfter, grayAfter, new Size(5, 5), 0);
 
-                Mat diffIntensity = new Mat();
-                Core.absdiff(grayBefore, grayAfter, diffIntensity);
-                double intensityScore = Core.mean(diffIntensity).val[0];
+            Mat diffIntensity = new Mat();
+            Core.absdiff(grayBefore, grayAfter, diffIntensity);
+            double intensityScore = Core.mean(diffIntensity).val[0];
 
-                // --- STEP 2: Structural Edge Difference (The Shadow Killer) ---
-                // Shadows do not create hard edges. Pieces do.
-                Mat edgesBefore = new Mat();
-                Mat edgesAfter = new Mat();
+            // --- STEP 2: Edges ---
+            Mat edgesBefore = new Mat();
+            Mat edgesAfter = new Mat();
 
-                // Thresholds 40/100 are standard for detecting piece outlines without picking up wood grain too much
-                Imgproc.Canny(grayBefore, edgesBefore, 40, 100);
-                Imgproc.Canny(grayAfter, edgesAfter, 40, 100);
+            Imgproc.Canny(grayBefore, edgesBefore, 40, 100);
+            Imgproc.Canny(grayAfter, edgesAfter, 40, 100);
 
-                Mat diffEdges = new Mat();
-                Core.absdiff(edgesBefore, edgesAfter, diffEdges);
-                double edgeScore = Core.mean(diffEdges).val[0];
+            Mat diffEdges = new Mat();
+            Core.absdiff(edgesBefore, edgesAfter, diffEdges);
+            double edgeScore = Core.mean(diffEdges).val[0];
 
-                // --- STEP 3: Combined Decision Logic ---
-
-                // LOGIC EXPLAINED:
-                // 1. Intensity must change (Base requirement).
-                // 2. BUT, Structure (Edges) must ALSO change.
-                // A shadow will cause high Intensity Score (~30-50) but very low Edge Score (~0-1).
-                // A moved piece will cause high Intensity Score AND high Edge Score.
-                double INTENSITY_THRESH;
-                double EDGE_THRESH; 
-                // eğer ki row + col tek ise denk gelen kare siyah, siyah üzerine oynanan hamlelerde intensity farkı daha fazla
-                if((row + col) % 2 != 0) {
-                    INTENSITY_THRESH = 28.0;
+            // --- STEP 3: Logic ---
+            double INTENSITY_THRESH;
+            double EDGE_THRESH;
+            
+             if((row + col) % 2 != 0) {
+                    INTENSITY_THRESH = 25.0;
                     EDGE_THRESH = 6.0;
                 } else {
                     if((row == 6 && col == 4) || (row == 4 && col == 4)){
                         System.out.println("DEBUG: intensity: " + intensityScore + " - edge: " + edgeScore);
                     }
-                    INTENSITY_THRESH = 22.0;
+                    INTENSITY_THRESH = 15.0;
                     EDGE_THRESH = 5.0;
-                }                  
+            }                   
 
-                boolean isChanged = false;
+            boolean isChanged = false;
 
-                if (intensityScore > INTENSITY_THRESH) {
-                    // Potential change detected, verify if it's just a shadow
-                    if (edgeScore > EDGE_THRESH) {
-                        isChanged = true;
-                    } else {
-                        // This is likely a shadow (Color changed, but structure didn't)
-                        // Draw Blue debug rect for "Shadow Detected / Ignored"
-                        Imgproc.rectangle(diffViz, strictRect, new Scalar(255, 0, 0), 1);
-                    }
-                }
-
-                if (isChanged) {
-                    String chessNotation = (char)('A' + col) + "" + (8 - row);
-                    changes.add(chessNotation);
-                    // Red for confirmed change
-                    Imgproc.rectangle(diffViz, strictRect, new Scalar(0, 0, 255), 2);
+            if (intensityScore > INTENSITY_THRESH) {
+                if (edgeScore > EDGE_THRESH) {
+                    isChanged = true;
                 } else {
-                    // Green for no change
-                    // Imgproc.rectangle(diffViz, strictRect, new Scalar(0, 255, 0, 50), 1);
+                    Imgproc.rectangle(diffViz, strictRect, new Scalar(255, 0, 0), 1);
                 }
-
-                // Clean up Mats to prevent memory leaks in loop
-                roiBefore.release(); roiAfter.release();
-                grayBefore.release(); grayAfter.release();
-                diffIntensity.release();
-                edgesBefore.release(); edgesAfter.release(); diffEdges.release();
             }
-        }
 
-        if (BoardDetector.DEBUG_MODE) {
-            Imgcodecs.imwrite("output/debug_change_heatmap.jpg", diffViz);
-        }
+            if (isChanged) {
+                String chessNotation = (char)('A' + col) + "" + (8 - row);
+                changes.add(chessNotation);
+                
+                // NEW: Store the combined score to distinguish real moves from parallax shadows
+                // We weight edgeScore higher as it is the primary differentiator for solid pieces
+                scoreMap.put(chessNotation, intensityScore + (edgeScore * 2.0));
 
+                Imgproc.rectangle(diffViz, strictRect, new Scalar(0, 0, 255), 2);
+            }
+
+            roiBefore.release(); roiAfter.release();
+            grayBefore.release(); grayAfter.release();
+            diffIntensity.release();
+            edgesBefore.release(); edgesAfter.release(); diffEdges.release();
+        }
+    }
+
+    if (BoardDetector.DEBUG_MODE) {
+        Imgcodecs.imwrite("output/debug_change_heatmap.jpg", diffViz);
+    }
+
+    // NEW: Helper call to filter parallax
+    return resolveParallaxOrEnPassant(changes, scoreMap);
+}
+
+// --- NEW HELPER FUNCTIONS ---
+
+private static List<String> resolveParallaxOrEnPassant(List<String> changes, Map<String, Double> scores) {
+    // Only apply logic if we detected exactly 3 changes
+    if (changes.size() != 3) {
         return changes;
     }
+
+    // Check if this is a valid En Passant trajectory
+    if (isEnPassantPattern(changes)) {
+        return changes; // It's a valid 3-square move, return as is
+    }
+
+    // If not En Passant, it's likely Parallax (Ghost square).
+    // Sort by score descending (Highest change confidence first)
+    changes.sort((a, b) -> Double.compare(scores.get(b), scores.get(a)));
+
+    // Return the top 2 squares (The real From/To squares)
+    return new ArrayList<>(changes.subList(0, 2));
+}
+
+private static boolean isEnPassantPattern(List<String> squares) {
+    Set<Integer> files = new HashSet<>();
+    Set<Integer> ranks = new HashSet<>();
+
+    for (String s : squares) {
+        files.add(s.charAt(0) - 'A');
+        ranks.add(Integer.parseInt(s.substring(1)));
+    }
+
+    // A valid En Passant involves exactly 2 Files and 2 Ranks.
+    // Example: White Pawn E5 captures Black Pawn D5 -> lands on D6.
+    // Squares: E5, D5, D6.
+    // Files: E, D (Size 2). Ranks: 5, 6 (Size 2).
+    // Parallax usually occurs on 1 File (e.g., Queen D1->D8 parallaxing D7) or spans 3 ranks.
+    return files.size() == 2 && ranks.size() == 2;
+}
 
     public static Mat getSquareForModel(Mat warpedBoard, int logicalRank, int logicalFile) {
         // 1. Convert Logical Rank (0=White side) to Visual Row (0=Top)

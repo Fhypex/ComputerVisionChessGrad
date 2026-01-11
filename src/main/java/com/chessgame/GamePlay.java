@@ -8,15 +8,20 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
 import org.opencv.core.Point;
+import org.opencv.imgcodecs.Imgcodecs;
 
 import com.chessgame.ChessGameTracker.MoveResult;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -31,6 +36,11 @@ public class GamePlay extends Application {
     private Label statusLabel;
     private Label aiSuggestionLabel; // NEW: UI for Stockfish moves
     private HttpHandDetector handDetector;
+
+    // --- NEW: Debug Views for Warp Logic ---
+    private ImageView prevWarpedView;
+    private ImageView currentWarpedView;
+    // ---------------------------------------
 
     // returns of model
     private final String[] MODEL_CLASSES = {
@@ -95,6 +105,16 @@ public class GamePlay extends Application {
         aiSuggestionLabel.setStyle("-fx-text-fill: #00BFFF; -fx-font-weight: bold; -fx-font-size: 14px; -fx-border-color: #00BFFF; -fx-padding: 5;");
         // ----------------------------
 
+        // --- NEW: Initialize Debug Image Views ---
+        prevWarpedView = new ImageView();
+        prevWarpedView.setFitWidth(200); // Set a reasonable width
+        prevWarpedView.setPreserveRatio(true);
+
+        currentWarpedView = new ImageView();
+        currentWarpedView.setFitWidth(200); // Set a reasonable width
+        currentWarpedView.setPreserveRatio(true);
+        // -----------------------------------------
+
         // --- Buttons ---
         Button btnStartGame = new Button("START REALTIME GAME");
         btnStartGame.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
@@ -126,7 +146,16 @@ public class GamePlay extends Application {
         controlBox.setStyle("-fx-background-color: #333; -fx-alignment: center-left;");
 
         VBox rightPane = new VBox(10);
-        rightPane.getChildren().addAll(new Label("Camera Feed"), cameraViewer, logArea);
+        // Added the new ImageViews to the layout
+        rightPane.getChildren().addAll(
+            new Label("Camera Feed"), 
+            cameraViewer, 
+            new Label("Debug: Prev State"),
+            prevWarpedView,
+            new Label("Debug: Current State"),
+            currentWarpedView,
+            logArea
+        );
         rightPane.setPadding(new Insets(10));
 
         BorderPane root = new BorderPane();
@@ -134,7 +163,7 @@ public class GamePlay extends Application {
         root.setRight(rightPane);
         root.setBottom(controlBox);
 
-        Scene scene = new Scene(root, 1200, 800);
+        Scene scene = new Scene(root, 1250, 950); // Increased size to fit debug images
         stage.setScene(scene);
         stage.setTitle("Realtime Chess Simulation");
         stage.setOnCloseRequest(e -> {
@@ -183,6 +212,8 @@ public class GamePlay extends Application {
             
             Platform.runLater(() -> {
                 log("Board Configured. Game Loop Starting...");
+                // Set initial image for debugging
+                prevWarpedView.setImage(matToImage(this.prevWarpedImage));
                 startGameLoop();
             });
 
@@ -220,6 +251,17 @@ public class GamePlay extends Application {
                 
                 // 2. Warp 
                 Mat currentWarped = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
+
+                // --- NEW: Update UI Debug Images ---
+                // We must convert Mat to Image. Since we are on a background thread, 
+                // we wrap the update in Platform.runLater
+                Image curImg = matToImage(currentWarped);
+                Image prevImg = matToImage(prevWarpedImage);
+                Platform.runLater(() -> {
+                    if (curImg != null) currentWarpedView.setImage(curImg);
+                    if (prevImg != null) prevWarpedView.setImage(prevImg);
+                });
+                // -----------------------------------
 
                 // 3. Detect Changes
                 List<String> changedSquares = ChessMoveLogic.detectSquareChanges(prevWarpedImage, currentWarped);
@@ -269,6 +311,9 @@ public class GamePlay extends Application {
 
                             // Lock in the new board state
                             prevWarpedImage = currentWarped; 
+                            
+                            // Update the debug view for "Previous" now that we have locked it in
+                            prevWarpedView.setImage(matToImage(prevWarpedImage));
 
                             // --- NEW: Trigger Stockfish API ---
                             checkAndTriggerStockfish();
@@ -386,6 +431,19 @@ public class GamePlay extends Application {
     }
 
     // --- Helpers ---
+    
+    // NEW Helper method to convert OpenCV Mat to JavaFX Image
+    private Image matToImage(Mat mat) {
+        if (mat == null || mat.empty()) return null;
+        try {
+            MatOfByte buffer = new MatOfByte();
+            Imgcodecs.imencode(".png", mat, buffer);
+            return new Image(new ByteArrayInputStream(buffer.toArray()));
+        } catch (Exception e) {
+            System.err.println("Failed to convert Mat to Image: " + e.getMessage());
+            return null;
+        }
+    }
 
     private void showIllegalMoveAlert(String details) {
         Alert alert = new Alert(Alert.AlertType.WARNING);
@@ -414,6 +472,10 @@ public class GamePlay extends Application {
              Mat currentFrame = cameraViewer.captureCurrentFrame();
              if (currentFrame != null && !currentFrame.empty() && boardCorners != null) {
                  this.prevWarpedImage = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
+                 
+                 // Update Debug UI
+                 prevWarpedView.setImage(matToImage(this.prevWarpedImage));
+                 
                  log("Visual tracker reset to current board state.");
              }
         }
