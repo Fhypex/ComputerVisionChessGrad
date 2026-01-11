@@ -112,12 +112,14 @@ public class ChessMoveLogic {
                 // A moved piece will cause high Intensity Score AND high Edge Score.
                 double INTENSITY_THRESH;
                 double EDGE_THRESH; 
-                // eğer ki row + col çift ise denk gelen kare siyah, siyah üzerine oynanan hamlelerde intensity farkı daha fazla
-                if((row + col) % 2 == 0) {
+                // eğer ki row + col tek ise denk gelen kare siyah, siyah üzerine oynanan hamlelerde intensity farkı daha fazla
+                if((row + col) % 2 != 0) {
                     INTENSITY_THRESH = 28.0;
                     EDGE_THRESH = 6.0;
                 } else {
-                    // beyazlarda daha az fark mevcut
+                    if((row == 6 && col == 4) || (row == 4 && col == 4)){
+                        System.out.println("DEBUG: intensity: " + intensityScore + " - edge: " + edgeScore);
+                    }
                     INTENSITY_THRESH = 22.0;
                     EDGE_THRESH = 5.0;
                 }                  
