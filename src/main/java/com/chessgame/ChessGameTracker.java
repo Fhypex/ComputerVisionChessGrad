@@ -172,7 +172,6 @@ public class ChessGameTracker {
     }
 
     public MoveResult processChangedSquares(List<String> changedSquares) {
-        
         if (isGameOver) {
             System.out.println(">>> GAME IS OVER. No more moves accepted. <<<");
             return MoveResult.noise();
@@ -182,7 +181,24 @@ public class ChessGameTracker {
             return MoveResult.none();
         }
 
-        if (changedSquares.size() > 7) {
+        if (changedSquares.size() >= 4) {
+            boolean touchesBackRank = false;
+            for (String s : changedSquares) {
+                // In algebraic notation (e.g., "e4"), the rank is at index 1
+                if (s.length() >= 2) {
+                    char rank = s.charAt(1);
+                    if (rank == '1' || rank == '8') {
+                        touchesBackRank = true;
+                        break;
+                    }
+                }
+            }
+            if (!touchesBackRank) {
+                return MoveResult.noise();
+            }
+        }
+
+        if (changedSquares.size() > 6) {
             return MoveResult.noise();
         }
         

@@ -3,6 +3,7 @@ package com.chessgame;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
@@ -37,10 +38,10 @@ public class GamePlay extends Application {
     private Label aiSuggestionLabel; // NEW: UI for Stockfish moves
     private HttpHandDetector handDetector;
 
-    // --- NEW: Debug Views for Warp Logic ---
+    // --- Debug Views for Warp Logic ---
     private ImageView prevWarpedView;
     private ImageView currentWarpedView;
-    // ---------------------------------------
+    // ----------------------------------
 
     // returns of model
     private final String[] MODEL_CLASSES = {
@@ -105,15 +106,15 @@ public class GamePlay extends Application {
         aiSuggestionLabel.setStyle("-fx-text-fill: #00BFFF; -fx-font-weight: bold; -fx-font-size: 14px; -fx-border-color: #00BFFF; -fx-padding: 5;");
         // ----------------------------
 
-        // --- NEW: Initialize Debug Image Views ---
+        // --- Initialize Debug Image Views ---
         prevWarpedView = new ImageView();
-        prevWarpedView.setFitWidth(200); // Set a reasonable width
+        prevWarpedView.setFitWidth(200); 
         prevWarpedView.setPreserveRatio(true);
 
         currentWarpedView = new ImageView();
-        currentWarpedView.setFitWidth(200); // Set a reasonable width
+        currentWarpedView.setFitWidth(200); 
         currentWarpedView.setPreserveRatio(true);
-        // -----------------------------------------
+        // ------------------------------------
 
         // --- Buttons ---
         Button btnStartGame = new Button("START REALTIME GAME");
@@ -145,25 +146,31 @@ public class GamePlay extends Application {
         controlBox.setPadding(new Insets(10));
         controlBox.setStyle("-fx-background-color: #333; -fx-alignment: center-left;");
 
+        // --- UPDATED LAYOUT: Side-by-Side Debug Views ---
+        // Create small containers for label + image to keep them organized
+        VBox prevBox = new VBox(5, new Label("Debug: Prev State"), prevWarpedView);
+        VBox currBox = new VBox(5, new Label("Debug: Current State"), currentWarpedView);
+        
+        // Put them side by side
+        HBox debugRow = new HBox(15, prevBox, currBox);
+        debugRow.setAlignment(Pos.CENTER_LEFT);
+
         VBox rightPane = new VBox(10);
-        // Added the new ImageViews to the layout
         rightPane.getChildren().addAll(
             new Label("Camera Feed"), 
             cameraViewer, 
-            new Label("Debug: Prev State"),
-            prevWarpedView,
-            new Label("Debug: Current State"),
-            currentWarpedView,
-            logArea
+            debugRow,   // Side-by-side images
+            logArea     // Chat/Log below them
         );
         rightPane.setPadding(new Insets(10));
+        // ----------------------------------------------------
 
         BorderPane root = new BorderPane();
         root.setCenter(chessBoardUI.getBoardUI()); // Assuming getBoardUI returns the JavaFX Grid/Pane
         root.setRight(rightPane);
         root.setBottom(controlBox);
 
-        Scene scene = new Scene(root, 1250, 950); // Increased size to fit debug images
+        Scene scene = new Scene(root, 1250, 950);
         stage.setScene(scene);
         stage.setTitle("Realtime Chess Simulation");
         stage.setOnCloseRequest(e -> {
@@ -252,7 +259,7 @@ public class GamePlay extends Application {
                 // 2. Warp 
                 Mat currentWarped = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
 
-                // --- NEW: Update UI Debug Images ---
+                // --- Update UI Debug Images ---
                 // We must convert Mat to Image. Since we are on a background thread, 
                 // we wrap the update in Platform.runLater
                 Image curImg = matToImage(currentWarped);
@@ -261,7 +268,7 @@ public class GamePlay extends Application {
                     if (curImg != null) currentWarpedView.setImage(curImg);
                     if (prevImg != null) prevWarpedView.setImage(prevImg);
                 });
-                // -----------------------------------
+                // ------------------------------
 
                 // 3. Detect Changes
                 List<String> changedSquares = ChessMoveLogic.detectSquareChanges(prevWarpedImage, currentWarped);
@@ -273,7 +280,7 @@ public class GamePlay extends Application {
 
                     // 4. Process Move Logic
                     MoveResult result = tracker.processChangedSquares(changedSquares);
-                    System.out.println(result.toString());
+                    System.out.println(result.moveNotation);
                     
                     Platform.runLater(() -> {
                     switch (result.type) {
@@ -315,9 +322,9 @@ public class GamePlay extends Application {
                             // Update the debug view for "Previous" now that we have locked it in
                             prevWarpedView.setImage(matToImage(prevWarpedImage));
 
-                            // --- NEW: Trigger Stockfish API ---
+                            // --- Trigger Stockfish API ---
                             checkAndTriggerStockfish();
-                            // ----------------------------------
+                            // -----------------------------
                             break;
 
                         case ILLEGAL:
@@ -344,7 +351,7 @@ public class GamePlay extends Application {
     }
 
     /**
-     * NEW: Logic to check whose turn it is and ask Stockfish
+     * Logic to check whose turn it is and ask Stockfish
      */
     private void checkAndTriggerStockfish() {
         if (tracker == null || !isTracking) return;
@@ -388,7 +395,7 @@ public class GamePlay extends Application {
     }
 
     /**
-     * NEW: Voice Command Implementation
+     * Voice Command Implementation
      * Uses native OS TTS tools (PowerShell for Windows, 'say' for Mac)
      */
     private void speakMove(String text) {
@@ -432,7 +439,7 @@ public class GamePlay extends Application {
 
     // --- Helpers ---
     
-    // NEW Helper method to convert OpenCV Mat to JavaFX Image
+    // Helper method to convert OpenCV Mat to JavaFX Image
     private Image matToImage(Mat mat) {
         if (mat == null || mat.empty()) return null;
         try {

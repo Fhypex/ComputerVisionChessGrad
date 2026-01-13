@@ -109,14 +109,14 @@ public class ChessMoveLogic {
             double EDGE_THRESH;
             
              if((row + col) % 2 != 0) {
-                    INTENSITY_THRESH = 25.0;
+                    INTENSITY_THRESH = 23.0;
                     EDGE_THRESH = 6.0;
                 } else {
                     if((row == 6 && col == 4) || (row == 4 && col == 4)){
                         System.out.println("DEBUG: intensity: " + intensityScore + " - edge: " + edgeScore);
                     }
-                    INTENSITY_THRESH = 15.0;
-                    EDGE_THRESH = 5.0;
+                    INTENSITY_THRESH = 13.0;
+                    EDGE_THRESH = 4.0;
             }                   
 
             boolean isChanged = false;
