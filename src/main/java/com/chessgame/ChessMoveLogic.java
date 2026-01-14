@@ -13,6 +13,8 @@ import java.util.Set;
 
 public class ChessMoveLogic {
 
+    private static float lightLevel;
+
     /**
      * NEW: Standardized warping to ensure Before/After match pixel-for-pixel.
      * Uses the exact same geometry logic as extractSquareImages (Sky Buffer).
@@ -107,15 +109,16 @@ public class ChessMoveLogic {
             // --- STEP 3: Logic ---
             double INTENSITY_THRESH;
             double EDGE_THRESH;
-            
-             if((row + col) % 2 != 0) {
-                    INTENSITY_THRESH = 23.0;
-                    EDGE_THRESH = 6.0;
+            double dynamicBlack = 2.0f;
+            double dynamicWhite = 1.0f;
+             if((row + col) % 2 != 0) {                
+                    INTENSITY_THRESH = 21.0 + (dynamicBlack * lightLevel);
+                    EDGE_THRESH = 5.0;
                 } else {
                     if((row == 6 && col == 4) || (row == 4 && col == 4)){
                         System.out.println("DEBUG: intensity: " + intensityScore + " - edge: " + edgeScore);
                     }
-                    INTENSITY_THRESH = 13.0;
+                    INTENSITY_THRESH = 12.0 + (dynamicWhite * lightLevel);
                     EDGE_THRESH = 4.0;
             }                   
 
@@ -263,5 +266,17 @@ private static boolean isEnPassantPattern(List<String> squares) {
         char file = (char) ('a' + col);
         int rank = 8 - row;
         return "" + file + rank;
+    }
+
+    public static void setLightLevel(String currentLightMode) {
+        if(currentLightMode == "low") {
+            lightLevel = 3.0f;
+        }
+        if(currentLightMode == "mid") {
+            lightLevel = 2.0f;
+        }
+        if(currentLightMode == "high") {
+            lightLevel = 1.0f;
+        }
     }
 }

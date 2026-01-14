@@ -7,6 +7,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
@@ -72,6 +73,10 @@ public class GamePlay extends Application {
     
     // NEW: Prevents spamming the API during the same turn
     private boolean isThinking = false; 
+    
+    // NEW: Light Level Logic
+    private String currentLightMode = "mid"; // Default start value
+    private ComboBox<Integer> intervalSelector; // Selector for loop speed
 
     @Override
     public void start(Stage stage) {
@@ -116,21 +121,25 @@ public class GamePlay extends Application {
         currentWarpedView.setPreserveRatio(true);
         // ------------------------------------
 
-        // --- Buttons ---
+        // --- Buttons & Controls ---
         Button btnStartGame = new Button("START REALTIME GAME");
         btnStartGame.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
+        btnStartGame.setPrefHeight(40); // Height increased
         btnStartGame.setOnAction(e -> startCalibrationSequence());
 
         Button btnStopGame = new Button("STOP / RESET");
         btnStopGame.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
+        btnStopGame.setPrefHeight(40); // Height increased
         btnStopGame.setOnAction(e -> stopGameLoop());
 
         Button btnUndo = new Button("Undo Last Move");
         btnUndo.setStyle("-fx-background-color: #FF9800; -fx-text-fill: white; -fx-font-weight: bold;");
+        btnUndo.setPrefHeight(40); // Height increased
         btnUndo.setOnAction(e -> performUndo());
 
         Button btnFlip = new Button("Flip View");
         btnFlip.setStyle("-fx-background-color: #555; -fx-text-fill: white;");
+        btnFlip.setPrefHeight(40); // Height increased
         btnFlip.setOnAction(e -> {
             boolean current = chessBoardUI.isWhitePerspective();
             chessBoardUI.setPerspective(!current);
@@ -139,9 +148,54 @@ public class GamePlay extends Application {
             computerIsBlack = !computerIsBlack;
             tracker = new ChessGameTracker(computerIsBlack);
         });
+        
+        // --- NEW: Light Level Button ---
+        Button btnLightLevel = new Button("Light: MID");
+        btnLightLevel.setStyle("-fx-background-color: #FFC107; -fx-text-fill: black; -fx-font-weight: bold;");
+        btnLightLevel.setPrefHeight(40); // Height increased
+        btnLightLevel.setOnAction(e -> {
+            // Cycle: mid -> high -> low -> mid
+            switch (currentLightMode) {
+                case "mid":
+                    currentLightMode = "high";
+                    break;
+                case "high":
+                    currentLightMode = "low";
+                    break;
+                case "low":
+                    currentLightMode = "mid";
+                    break;
+            }
+            btnLightLevel.setText("Light: " + currentLightMode.toUpperCase());
+            // Call the static function on ChessMoveLogic
+            try {
+                ChessMoveLogic.setLightLevel(currentLightMode);
+            } catch (Exception ex) {
+                System.err.println("Method setLightLevel not found in ChessMoveLogic: " + ex.getMessage());
+            }
+        });
+
+        // --- NEW: Time Interval Selector ---
+        Label lblInterval = new Label("Loop(s):");
+        lblInterval.setStyle("-fx-text-fill: white;");
+        
+        intervalSelector = new ComboBox<>();
+        intervalSelector.getItems().addAll(1, 2, 3, 4, 5);
+        intervalSelector.setValue(2); // Default
+        intervalSelector.setPrefHeight(40); // Height increased
 
         // Add aiSuggestionLabel to your controlBox HBox
-        HBox controlBox = new HBox(15, btnStartGame, btnStopGame, btnFlip, btnUndo , statusLabel, aiSuggestionLabel);
+        HBox controlBox = new HBox(15, 
+            btnStartGame, 
+            btnStopGame, 
+            btnFlip, 
+            btnUndo, 
+            btnLightLevel, // Added here
+            lblInterval,   // Added label
+            intervalSelector, // Added selector
+            statusLabel, 
+            aiSuggestionLabel
+        );
         // Layouts
         controlBox.setPadding(new Insets(10));
         controlBox.setStyle("-fx-background-color: #333; -fx-alignment: center-left;");
@@ -170,7 +224,7 @@ public class GamePlay extends Application {
         root.setRight(rightPane);
         root.setBottom(controlBox);
 
-        Scene scene = new Scene(root, 1250, 950);
+        Scene scene = new Scene(root, 1350, 950); // Increased width slightly for new buttons
         stage.setScene(scene);
         stage.setTitle("Realtime Chess Simulation");
         stage.setOnCloseRequest(e -> {
@@ -180,6 +234,13 @@ public class GamePlay extends Application {
             System.exit(0);
         });
         stage.show();
+        
+        // Set initial light level logic just in case
+        try {
+            ChessMoveLogic.setLightLevel(currentLightMode);
+        } catch (Exception ex) {
+            // Ignore if not yet implemented
+        }
     }
 
     /**
@@ -236,7 +297,10 @@ public class GamePlay extends Application {
         
         gameLoopExecutor = Executors.newSingleThreadScheduledExecutor();
         
-        // Execute logic every 1 second
+        // Get user selected interval
+        long intervalSeconds = intervalSelector.getValue();
+        
+        // Execute logic based on selected interval
         gameLoopExecutor.scheduleWithFixedDelay(() -> {
             try {
                 if (!isTracking) return;
@@ -347,7 +411,7 @@ public class GamePlay extends Application {
                 e.printStackTrace();
                 Platform.runLater(() -> log("Error in Game Loop: " + e.getMessage()));
             }
-        }, 2000, 2000, TimeUnit.MILLISECONDS);
+        }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
     }
 
     /**
@@ -476,15 +540,15 @@ public class GamePlay extends Application {
 
         // 3. Reset Visual Tracking Base
         if (isTracking && cameraViewer != null) {
-             Mat currentFrame = cameraViewer.captureCurrentFrame();
-             if (currentFrame != null && !currentFrame.empty() && boardCorners != null) {
-                 this.prevWarpedImage = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
-                 
-                 // Update Debug UI
-                 prevWarpedView.setImage(matToImage(this.prevWarpedImage));
-                 
-                 log("Visual tracker reset to current board state.");
-             }
+              Mat currentFrame = cameraViewer.captureCurrentFrame();
+              if (currentFrame != null && !currentFrame.empty() && boardCorners != null) {
+                  this.prevWarpedImage = ChessMoveLogic.warpBoardStandardized(currentFrame, boardCorners);
+                  
+                  // Update Debug UI
+                  prevWarpedView.setImage(matToImage(this.prevWarpedImage));
+                  
+                  log("Visual tracker reset to current board state.");
+              }
         }
         
         // Check if we need to trigger AI (if undo made it computer's turn)

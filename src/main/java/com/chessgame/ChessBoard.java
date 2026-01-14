@@ -87,7 +87,8 @@ public class ChessBoard {
         for (int row = 0; row < 8; row++) {
             for (int col = 0; col < 8; col++) {
                 StackPane square = new StackPane();
-                Rectangle bg = new Rectangle(60, 60); // Square size
+                // CHANGED: Increased square size from 60 to 80
+                Rectangle bg = new Rectangle(80, 80); 
                 
                 // Color logic (checkerboard pattern)
                 boolean isLight = (row + col) % 2 == 0;
@@ -140,9 +141,10 @@ public class ChessBoard {
                     Image img = pieceImages.get(piece);
                     if (img != null) {
                         ImageView iv = new ImageView(img);
-                        iv.setFitWidth(50);
-                        iv.setFitHeight(50);
-                        iv.setPreserveRatio(true);
+                        // CHANGED: Increased piece size from 50 to 70
+                        iv.setFitWidth(75);
+                        iv.setFitHeight(75);
+                        iv.setPreserveRatio(true);                        
                         square.getChildren().add(iv);
                     } else {
                         // Fallback text if image missing
@@ -179,7 +181,8 @@ public class ChessBoard {
             String file = String.valueOf((char)('a' + logCol));
             Label l = new Label(file);
             StackPane.setAlignment(l, Pos.BOTTOM_RIGHT);
-            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 10px; -fx-padding: 2px;");
+            // CHANGED: Slightly larger font (12px)
+            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 12px; -fx-padding: 2px;");
             square.getChildren().add(l);
         }
         // Add Rank numbers on left file (Visual Col 0)
@@ -187,7 +190,8 @@ public class ChessBoard {
             String rank = String.valueOf(logRow + 1);
             Label l = new Label(rank);
             StackPane.setAlignment(l, Pos.TOP_LEFT);
-            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 10px; -fx-padding: 2px;");
+            // CHANGED: Slightly larger font (12px)
+            l.setStyle("-fx-text-fill: " + ((visRow+visCol)%2==0 ? "#B58863" : "#F0D9B5") + "; -fx-font-size: 12px; -fx-padding: 2px;");
             square.getChildren().add(l);
         }
     }
